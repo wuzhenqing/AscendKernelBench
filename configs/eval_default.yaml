@@ -1,0 +1,32 @@
+# Default evaluation configuration for AscendKernelBench.
+hardware: ascend910b2
+
+# Correctness protocol (README 3.5)
+num_correct_trials: 5
+seed: 42
+tolerances:
+  fp32: {atol: 1.0e-4, rtol: 1.0e-4}
+  fp16: {atol: 1.0e-2, rtol: 1.0e-2}
+  bf16: {atol: 1.0e-2, rtol: 1.0e-2}
+precision: fp32
+
+# Performance protocol (README 3.6)
+num_perf_trials: 100
+num_warmup: 3
+# Speedup above this threshold is flagged for manual review: excluded from
+# the p > 0 fast_p thresholds and the geometric mean, but still counted in
+# fast_0 (the correctness rate). See README section 5.
+excessive_speedup: 10.0
+
+# Timeouts (seconds). The build stage runs configure AND build, each allowed
+# build_timeout; the host-side worker budget is eval_timeout + 2*build_timeout.
+build_timeout: 600
+eval_timeout: 300
+
+# Generation defaults
+generation:
+  model: deepseek-v4-flash
+  temperature: 0.0
+  max_tokens: 16384
+  num_samples: 1
+  prompt_mode: one_shot   # zero_shot | one_shot | few_shot

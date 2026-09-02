@@ -72,25 +72,29 @@ asc-devkit 示例使用新版 API 风格，与 NPUKernelBench 时代的 msopgen 
 
 ### 3.5 正确性协议
 
-决策：单参考判定加按 dtype 分级容差。第二轮讨论做了简化：初版不采用 CPU 加 NPU 双参考取严格者，仅与 NPU 上 torch_npu 实现判定，避免参考间偏差标定的复杂性。
+决策：单参考判定加按 dtype 分级容差，并带 CPU 参考回退。第二轮讨论做了简化：不采用 CPU 加 NPU 双参考取严格者，避免参考间偏差标定的复杂性。
 
-参考实现为 NPU 上 torch_npu eager 执行的 Model，与待测同设备、同输入，数值路径一致，该参考同时作为性能基线。容差对齐 KernelBench 与 torchbench 标准：fp32 时 atol 与 rtol 均为 1e-4，fp16 与 bf16 时均为 1e-2；任务可通过契约自定义覆盖（custom_check）。输入由任务自定义 get_inputs 生成，评测侧按种子链派生各次试验的种子以保证可复现；默认五次正确性试验，全部通过才算正确。
+参考实现为 NPU 上 torch_npu eager 执行的 Model，与待测同设备、同输入，数值路径一致，该参考同时作为性能基线。容差对齐 KernelBench 与 torchbench 标准：fp32 时 atol 与 rtol 均为 1e-4，fp16 与 bf16 时均为 1e-2；任务可通过契约自定义覆盖（custom_check）。浮点与复数输出按容差比对；整型与布尔输出（索引、掩码等）要求精确相等（torch.equal），因为 torch.allclose 不接受非浮点 dtype。输入由任务自定义 get_inputs 生成，评测侧按种子链派生各次试验的种子以保证可复现；默认五次正确性试验，全部通过才算正确。
+
+两个实现要点（代码检视后修正）。其一，构造期播种：评测在构造 ModelNew、NPU 参考 Model、CPU 参考 Model 之前分别重置为同一种子（KernelBench 惯例），带随机初始化参数的任务（卷积、线性、归一化等）才可能通过——ModelNew 可按相同构造复现参考权重（见 4.3 节参数容器约定）。其二，推理模式：参考与候选模型均以 eval() 模式运行，正确性与计时阶段均在 no_grad 下执行，避免 BatchNorm 运行统计量漂移与 dropout 消耗 RNG 造成的两侧不对称。
+
+CPU 参考回退（实现阶段新增）：若参考 Model 本身无法在 NPU 上运行（torch_npu 未支持该算子，主要见于 L3、L4 复杂样例），评测自动回退为与 torch CPU 参考（fp32）比对；回退在任意一次试验失败时均触发，策略与试验顺序无关。此时题目无 NPU 基线、不计算加速比，但正确样本仍计入 fast_0（正确率），样本元数据标记 reference 为 cpu。这正是本基准希望暴露的高价值信号：LLM 用 Ascend C 实现了 torch_npu 尚未支持的算子，等价于为 torch_npu 做算子扩充。
 
 ### 3.6 性能协议与指标
 
 决策：基线为 torch_npu eager；指标为 fast_p 加 pass@k；结果格式与 KernelBench 在 schema 层面兼容（第三轮讨论确认）。
 
-计时使用 torch.npu.Event，默认预热 3 次、正式计时 100 次（均可配置），每次试验前清理 L2 缓存（以大张量填充，仿 KernelBench 的做法）。基线为 torch_npu eager 同机实测，并按硬件 profile 离线归档，保证跨次评测可比。加速比定义为基线均值除以 kernel 均值。fast_p 为正确且加速比超过 p 的任务占比，报告 p 取 0、0.5、0.8、1.0、1.5、2.0 六档；分母为全部样本数，含编译失败者，与 KernelBench 的语义一致。pass@k 在多样本时使用标准无偏估计；默认单样本快速评测，需要 pass@k 时调大采样数（如 10 个样本报 pass@1/5/10），温度等采样参数均可配置。
+计时使用 torch.npu.Event，默认预热 3 次、正式计时 100 次（均可配置），每次试验前清理 L2 缓存（以大张量填充，仿 KernelBench 的做法）。输入刷新采用自适应协议（代码检视后修正）：输入集不超过 256 MB 时逐试验重新生成（在计时窗口外准备，候选与参考以相同种子看到相同输入序列），防止结果缓存类作弊在全部试验中重放同一次计算；输入集更大时（KernelBench L1 即有 6.4 GB 输入，逐次重建会淹没被测对象）退化为固定输入（KernelBench 原生行为），并由计时后的新鲜输入正确性复核与异常加速标记兜底。计时后复核（实现阶段新增）：全部计时结束后，用一个从未在正确性试验中使用过的种子重新生成输入，再各跑一次参考与候选并比对；不通过则判 correctness = False——计时阶段重放缓存或跨调用状态漂移的候选在此暴露。基线为 torch_npu eager 同机实测，并按硬件 profile 离线归档，保证跨次评测可比；归档基线与评测内实时参考使用相同的自适应刷新协议。加速比定义为基线均值除以 kernel 均值。fast_p 为正确且加速比超过 p 的任务占比，报告 p 取 0、0.5、0.8、1.0、1.5、2.0 六档；分母为全部样本数，含编译失败者，与 KernelBench 的语义一致。fast_0 即正确率：所有正确样本均计入，含被标记异常加速的样本（该标记仅从 p 大于 0 的档位与几何平均中排除，供人工复查，不自动判负）。pass@k 在多样本时使用标准无偏估计；默认单样本快速评测，需要 pass@k 时调大采样数（如 10 个样本报 pass@1/5/10），温度等采样参数均可配置。
 
 格式兼容方面，eval_results.json 在字段层面对齐 KernelBench：以 problem_id 映射样本列表，每条样本含 sample_id、compiled、correctness、metadata、runtime、runtime_stats，pass@k 存于 pass_at_k_results.json。这样做便于复用 KernelBench 的分析逻辑，保持社区指标口径一致。需要注意，格式兼容不等于分数可比：两者基线不同（torch_npu eager 对比 CUDA 上的 PyTorch eager），fast_p 数值不可与 KernelBench 论文结果跨硬件横比。
 
 ### 3.7 任务集来源与分级
 
-决策：采用 KernelBench 式四级分级；任务集仅迁移 KernelBench 的 270 题。第二轮讨论做了简化：暂不迁移 NPUKernelBench 的 157 题，单一任务来源，无需去重与质量过滤；NPUKernelBench 任务作为后续扩展储备。
+决策：采用 KernelBench 式四级分级；任务集直接使用仓库内 KernelBench/ 子目录中的 270 题（自官方基准复制、含 changelog、已提交 Git 的受控版本），不做二次迁移、不复制到独立任务目录。第二轮讨论做了简化：暂不引入 NPUKernelBench 的 157 题，单一任务来源，无需去重与质量过滤；NPUKernelBench 任务作为后续扩展储备。
 
 四级分别为：L1 单算子（matmul、norm、激活等），100 题；L2 融合算子（Conv+Bias+ReLU、FlashAttention 类等），100 题；L3 复合子图或小网络（多 kernel 协同），50 题；L4 整模型级（HuggingFace 模型），20 题。L4 原样保留，即使 LLM 难以生成导致得分偏低，也作为区分度指标存在。
 
-迁移的便利性在于，KernelBench 任务的 Model、get_inputs、get_init_inputs 是纯 PyTorch 代码，可直接复用，只需验证 torch_npu 支持并补充算子规格说明 spec.md。
+任务即 KernelBench 原始单文件格式（Model、get_inputs、get_init_inputs，纯 PyTorch 代码），任务 id 为 level{L}/{文件名}。不为任务编写 spec.md 等额外规格说明（实现阶段修正，见 4.4 节）：KernelBench 不给 CUDA 生成任务提供规格提示，是因为信任 LLM 对 CUDA 的熟悉度；对 Ascend C 生成任务同理信任 LLM 的原生能力，写不出来正是基准应当反馈的能力差距。torch_npu 可运行性不作为任务准入条件：跑不通的题目由 CPU 参考回退承接（见 3.5 节）。
 
 ### 3.8 硬件配置化
 
@@ -144,11 +148,8 @@ AscendKernelBench/
 ├── build_template/               # 固定 CMake 构建工程（产物统一为 custom_op）
 │   ├── CMakeLists.txt
 │   └── （pybind 绑定约定说明）
-├── tasks/
-│   ├── level1/001_xxx/
-│   │   ├── task.py               # Model、get_inputs、get_init_inputs（可选 custom_check）
-│   │   └── spec.md               # 算子规格说明（prompt 主输入）
-│   └── level2/ ... level4/
+├── KernelBench/                  # 任务集（官方基准受控副本，270 题，直接使用）
+│   └── level1/ ... level4/       # 单文件任务：Model、get_inputs、get_init_inputs
 ├── scripts/
 │   ├── run_single.py             # 单题：生成、构建、评测
 │   ├── generate.py               # 批量生成（n_sample）
@@ -195,13 +196,15 @@ LLM 需输出两个代码块，标记在 prompt 中约定。
 
 关于 model_new.py 的定位（第三轮讨论确认）：它只是薄包装层，主要工作量在 custom_op.asc（kernel、host、编译），包装层通常只有几行调用。它仍由 LLM 生成而非框架自动生成，理由是保持与 KernelBench 一致的 Model 与 ModelNew 契约，能处理带属性算子（stride、padding）、多输入输出、权重参数传递等情况；prompt 中会把包装约定写得足够简单，使错误集中在 .asc 文件。
 
+参数容器约定（代码检视后新增）：带参数任务（nn.Conv2d、nn.Linear、归一化层等）允许 ModelNew 在 __init__ 中按相同方式构造同样的 nn 模块作为参数容器——评测在构造 Model 与 ModelNew 前以同一种子播种，相同构造即得到相同权重——但禁止调用这些模块做计算，只能把其 .weight 与 .bias 等张量传入自定义算子。这使带参数任务可解，同时保持"全部计算在 Ascend C kernel 中"的契约。
+
 评测框架将两者写入运行目录，调用固定 CMake 工程（按硬件 profile 注入架构）构建，然后 import 评测。
 
 ### 4.4 Prompt 构造（第三轮讨论确认）
 
-方案为组件化模板，纯 Python 实现，不引入 KernelBench 的 TOML 机制，因为单 backend 不需要该抽象。组件按序拼装：problem_statement 是任务陈述，含 spec.md 算子规格与 task.py 中 Model 源码；hardware_block 是硬件契约，从硬件 profile 注入核数、UB 预算、对齐约束、dtype 支持、API 风格锁定；examples_block 是 one-shot 示例对，展示从示例任务输入到示例答案（custom_op.asc 加 model_new.py）；output_contract 是输出契约，约定双代码块标记、模块名 custom_op、禁止测试代码；instruction 是指令，要求生成真实可编译代码、只输出两个代码块。
+方案为组件化模板，纯 Python 实现，不引入 KernelBench 的 TOML 机制，因为单 backend 不需要该抽象。组件按序拼装：problem_statement 是任务陈述，即 task.py 中 Model 源码（与 KernelBench 一致，不附加任何规格说明文档）；hardware_block 是硬件契约，从硬件 profile 注入核数、UB 预算、对齐约束、dtype 支持、API 风格锁定；examples_block 是 one-shot 示例对，展示从示例任务输入到示例答案（custom_op.asc 加 model_new.py）；output_contract 是输出契约，约定双代码块标记、模块名 custom_op、禁止测试代码；instruction 是指令，要求生成真实可编译代码、只输出两个代码块。
 
-与 KernelBench prompt 的关键差异，根源在于我们的 model_new.py 是薄包装，而 KernelBench 的 ModelNew 文件承载 CUDA 源码字符串与 load_inline 编译逻辑。具体有五点。交付物上，KernelBench 是单代码块，我们是双代码块。示例教学重心上，KernelBench 教 Python 侧机制（嵌源码、load_inline），因为 LLM 熟悉 CUDA；我们必须教 Ascend C 本体（kernel 类结构、__vector__、UB 与 tiling、host launch、pybind 绑定），因为 LLM 语料中 Ascend C 极少，示例承担 DSL 教学职能。编译责任上，KernelBench 在生成代码中（load_inline 参数写错也会失败），我们在框架侧固定 CMake，编译错误可干净归因于 .asc。任务陈述措辞上，KernelBench 强调用自定义 CUDA 替换 PyTorch 算子、粒度自由；我们改为用 Ascend C 实现 spec.md 定义的算子，包装层为固定薄约定，优化工作都在 .asc，L2 与 L3 保留融合自由度的措辞。硬件注入上，KernelBench 是可选组件，我们是必需组件。
+与 KernelBench prompt 的关键差异，根源在于我们的 model_new.py 是薄包装，而 KernelBench 的 ModelNew 文件承载 CUDA 源码字符串与 load_inline 编译逻辑。具体有五点。交付物上，KernelBench 是单代码块，我们是双代码块。示例教学重心上，KernelBench 教 Python 侧机制（嵌源码、load_inline），因为 LLM 熟悉 CUDA；我们必须教 Ascend C 本体（kernel 类结构、__vector__、UB 与 tiling、host launch、pybind 绑定），因为 LLM 语料中 Ascend C 极少，示例承担 DSL 教学职能。编译责任上，KernelBench 在生成代码中（load_inline 参数写错也会失败），我们在框架侧固定 CMake，编译错误可干净归因于 .asc。任务陈述措辞上，KernelBench 强调用自定义 CUDA 替换 PyTorch 算子、粒度自由；我们改为用 Ascend C 实现参考 Model 定义的算子，包装层为固定薄约定，优化工作都在 .asc，L2 与 L3 保留融合自由度的措辞。硬件注入上，KernelBench 是可选组件，我们是必需组件。
 
 few-shot 示例作为引擎侧资产存放于 src/ascend_kernel_bench/prompts/examples/，与 tasks 完全隔离：任务不附带自身参考答案（3.10 节的防泄漏考虑），而示例是故意公开的 prompt 材料，并非任何实际任务的答案，两者不矛盾。示例必须经目标硬件 profile 真实编译运行通过后才可入库（见第 6 节开放问题）。
 
@@ -210,27 +213,28 @@ few-shot 示例作为引擎侧资产存放于 src/ascend_kernel_bench/prompts/ex
 ### 4.5 评测流水线
 
 ```
-task.py + spec.md
+KernelBench/level{L}/{task}.py（Model 源码即任务陈述）
     │  prompt.py（注入硬件 profile、输出契约）
     ▼
 LLM（OpenAI 兼容服务）──► custom_op.asc + model_new.py
-    │  checker.py 静态检查
+    │  checker.py 静态检查（model_new.py AST 级 + custom_op.asc 宿主侧扫描）
     ▼
 build.py（固定 CMake 工程，按 profile 注入 SoC 版本）──► custom_op.so
     │  失败 → compile_pass = False
     ▼
-eval.py 正确性：num_correct_trials 组种子输入
-    Model（NPU torch_npu eager 参考） vs ModelNew（NPU custom）对比
-    dtype 分级容差（fp32 1e-4，fp16 与 bf16 1e-2）
+eval.py 正确性：num_correct_trials 组种子输入，两侧模型均以 eval() 运行
+    Model（NPU torch_npu eager 参考；不支持时回退 CPU 参考） vs ModelNew（NPU custom）对比
+    浮点按 dtype 分级容差（fp32 1e-4，fp16 与 bf16 1e-2）；整型与布尔输出精确相等
     │  失败 → correctness = False
     ▼
-timing.py 性能：torch.npu.Event，预热 3 次、计时 100 次，逐次清理 L2
+timing.py 性能：torch.npu.Event，预热 3 次、计时 100 次，逐次清理 L2；
+    小输入（≤256 MB）逐试验刷新，大输入固定 + 计时后新鲜输入复核
     基线 = torch_npu eager（同机实测，按硬件归档）
     ▼
 score.py：加速比、fast_p、pass@k ──► runs/{run_name}/eval_results.json
 ```
 
-工程要点：每个样本在独立子进程中评测，编译与评测分别设超时（如 600 秒与 300 秒）；多样本、多任务并行时按 ASCEND_RT_VISIBLE_DEVICES 分卡；生成与评测解耦，生成产物落盘后可重复评测、更换硬件重测。
+工程要点：每个样本在独立子进程中评测，子进程为进程组组长，超时时由宿主按进程组 SIGKILL（不会泄漏持有 NPU 的 worker）；宿主侧超时预算为 eval_timeout 加两倍 build_timeout（configure 与 build 各占一份编译预算）；多样本、多任务并行时按 ASCEND_RT_VISIBLE_DEVICES 分卡；生成与评测解耦，生成产物落盘后可重复评测、更换硬件重测。
 
 ### 4.6 结果契约
 
@@ -248,16 +252,18 @@ runs/{run_name}/
 
 ## 5. 防作弊设计（对齐并强化 KernelBench）
 
-静态检查在生成后、编译前执行，规则集借鉴 llm4ascend 的 static_checker（见 2.3 节）：禁止 model_new.py 直接调用 torch 原生对应算子（torch.mm、nn.Conv2d、F 系列等）或 aclnn 接口产出结果；禁止 kernel 空实现、直接返回输入、缓存结果复用、try/except 回退到 CPU 或 NumPy；禁止 monkey-patch 计时与同步函数、使用 threading 或 stream 旁路、操作评测内部状态；检查前先对嵌入的 C++ 源码做掩码（以 AST 定位字符串常量并置空），避免 C++ 文本误触 Python 规则。
+静态检查在生成后、编译前执行，规则集借鉴 llm4ascend 的 static_checker（见 2.3 节），并在代码检视后做了两轮强化。第一轮强化（AST 语义检查，针对 model_new.py）：正则只能匹配固定拼写，容易绕过，因此计算禁令改为 AST 层面实施——解析 import 别名（import torch as t、from torch.nn.functional import sigmoid 等）后按解析路径判定；禁止 torch 根命名空间下一切非白名单调用（白名单仅含分配、元数据与数据搬运类 glue）；禁止张量方法形式的计算（x.softmax(-1)、a.matmul(b) 等）；禁止张量上的运算符与张量数据比较（A @ B、A + B、x > 0 等；整数 shape 算术合法）；禁止 getattr 动态取 torch 属性、exec/eval/__import__、importlib/ctypes/subprocess/socket 等动态与宿主副作用通道；nn 层允许构造（参数容器，见 4.3 节）但禁止调用；并要求 wrapper 真实调用 custom_op（仅 import 不算）。第二轮强化（custom_op.asc 宿主侧扫描）：.asc 是链接完整 libtorch 的任意 C++，此前完全不受检。现在要求源码必须含 __global__ __vector__ 核函数与 PYBIND11_MODULE（纯 host 侧 ATen 实现不算 Ascend C kernel）；host 封装只允许 at::empty 等分配类调用，禁止 ATen 计算调用（at::matmul、tensor.relu() 等）、厂商预构建算子（aclnn*、aclop*）与宿主副作用（system/popen/fork、socket、dlopen、宿主线程）；匹配前先剥离 C++ 注释，防止注释伪造标记。
 
-运行时检查包括：输入污染检查，候选执行前后输入张量不得被修改；异常加速标记，加速比超过十倍的结果标记人工复查；每次试验使用不同种子输入，输出必须真实依赖当前输入。
+保留的正则检查（作用于剥离注释、掩码全部字符串常量后的源码）：禁止 try/except 与 pass 回退旁路；禁止 .cpu()/.numpy()/NumPy；禁止 torch_npu.npu_* 与 aclnn 捷径；禁止 monkey-patch 计时与同步函数、threading 或 stream 旁路、lazy tensor 子类化、按名的结果缓存模式。
+
+需要明确静态检查的边界：它是建议性防线，封堵的是意外与低成本绕过，无法抵御蓄意混淆。运行时检查作为兜底：输入污染检查，候选执行前后输入张量不得被修改；异常加速标记，加速比超过十倍的结果标记人工复查（仅从 p 大于 0 的 fast_p 档位与几何平均中排除，不影响 fast_0 正确率）；正确性各试验使用不同种子输入，计时阶段逐试验刷新输入，输出必须真实依赖当前输入。
 
 ## 6. 开放问题（待原型阶段验证）
 
-第二轮讨论已关闭三项：双参考判定改为 torch_npu 单参考，L4 可行性改为原样保留、接受低分，任务去重因仅 KernelBench 单一来源而消失。以下为保留项。
+第二轮讨论已关闭三项：双参考判定改为 torch_npu 单参考，L4 可行性改为原样保留、接受低分，任务去重因仅 KernelBench 单一来源而消失。实现阶段又关闭两项：任务不附带 spec.md（信任 LLM 原生能力，与 KernelBench 对 CUDA 的态度一致）；L3、L4 参考实现的 torch_npu 可运行性不再是准入条件，跑不通的题目由 CPU 参考回退承接（见 3.5 节），正确结果作为 torch_npu 算子扩充信号单独标记。以下为保留项。
 
-一，动态 shape：v1 采用固定 shape（get_inputs 形状固定），动态 shape 作为任务元数据扩展，后续版本支持。二，tiling 考察深度：直调模式下 tiling 由 host 代码手动计算，full 模式已覆盖；是否在 spec 中给出 tiling 提示（影响难度定位）待任务迁移时确定。三，L4 参考实现的 torch_npu 可运行性：L4 题目原样保留，但参考 Model 本身需能在 torch_npu 上运行，否则没有基线；迁移时逐题验证，跑不通的题目标记处理。四，prompt 中 few-shot 示例的验证标准：llm4ascend 的教训是残缺、不可编译的示例会严重拉低单次生成成功率；本项目要求 prompt 内置示例（至少 Add 一个完整算子）必须在目标硬件 profile 上真实编译运行通过后才入库，并随 CANN 版本升级定期回归。
+一，动态 shape：v1 采用固定 shape（get_inputs 形状固定），动态 shape 作为任务元数据扩展，后续版本支持。二，tiling 考察深度：直调模式下 tiling 由 host 代码手动计算，full 模式已覆盖；prompt 不提供 tiling 提示，tiling 能力本身属于被考察范围。三，prompt 中 few-shot 示例的验证标准：llm4ascend 的教训是残缺、不可编译的示例会严重拉低单次生成成功率；本项目要求 prompt 内置示例（至少 Add 一个完整算子）必须在目标硬件 profile 上真实编译运行通过后才入库，并随 CANN 版本升级定期回归。
 
 ## 7. 实施路线（草案）
 
-Phase 0：搭建引擎骨架与固定 CMake 构建工程，用一至两个示例任务（如 Add、Matmul）在 910B2 上端到端打通。Phase 1：迁移 KernelBench L1 的 100 题，建立基线归档机制与 fast_p 报表。Phase 2：迁移 KernelBench L2 与 L3 共 150 题。Phase 3：迁移 KernelBench L4 的 20 题并验证 torch_npu 可运行性，适配 950PR profile。Phase 4：完善文档（部署指南、任务编写规范），做防作弊对抗测试，发布 v1。后续扩展：NPUKernelBench 任务迁移、动态 shape、Agent 多轮评测维度。
+Phase 0：搭建引擎骨架与固定 CMake 构建工程，用一至两个示例任务（如 Add、Matmul）在 910B2 上端到端打通。Phase 1：跑通 KernelBench L1 的 100 题，建立基线归档机制与 fast_p 报表。Phase 2：覆盖 KernelBench L2 与 L3 共 150 题，标定 CPU 参考回退题目清单。Phase 3：覆盖 KernelBench L4 的 20 题，适配 950PR profile。Phase 4：完善文档（部署指南、任务编写规范），做防作弊对抗测试，发布 v1。后续扩展：NPUKernelBench 任务引入、动态 shape、Agent 多轮评测维度。

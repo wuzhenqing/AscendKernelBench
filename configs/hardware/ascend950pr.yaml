@@ -1,0 +1,18 @@
+# Ascend 950PR hardware profile (reserved; validate specs before use).
+name: ascend950pr
+soc_version: Ascend950PR
+cmake_arch: dav-3510
+ai_core_num: 32
+ub_size_kb: 256
+l2_cache_mb: 192
+hbm_gb: 128
+memory_bandwidth_gbps: 4000
+supported_dtypes: [fp16, fp32, bf16, int32, int64]
+api_style: |
+  - Kernel functions are annotated `__global__ __vector__` (vector core), NOT legacy `__aicore__`.
+  - Call `AscendC::InitSocState()` at kernel entry and `AscendC::PipeBarrier<PIPE_ALL>()` at exit.
+  - Allocate UB with `AscendC::LocalMemAllocator<AscendC::Hardware::UB>`, NOT legacy TPipe.
+  - Use `ascendc_assert` for device-side assertions.
+  - Use `AscendC::SetFlag<AscendC::HardEvent::...>` / `AscendC::WaitFlag<...>` for event sync.
+  - Use `AscendC::DataCopy` / `AscendC::DataCopyPad` for GM<->UB movement; tail blocks must be
+    handled safely (DataCopyPad or explicit tail tiling).

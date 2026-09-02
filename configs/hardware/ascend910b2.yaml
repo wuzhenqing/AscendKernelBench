@@ -1,0 +1,46 @@
+# Ascend 910B2 (Atlas A2 series) hardware profile.
+# cmake_arch is injected into CMAKE_ASC_ARCHITECTURES at build time;
+# the remaining fields are injected into the prompt hardware block.
+name: ascend910b2
+soc_version: Ascend910B2
+cmake_arch: dav-2201
+# Measured via torch.npu.get_device_properties: 24 cube + 48 vector cores.
+# __vector__ kernels may launch up to vector_core_num blocks.
+ai_core_num: 48
+cube_core_num: 24
+vector_core_num: 48
+ub_size_kb: 192
+l2_cache_mb: 192
+hbm_gb: 64
+memory_bandwidth_gbps: 1600
+supported_dtypes: [fp16, fp32, bf16, int32, int64]
+api_style: |
+  - Kernel functions are annotated `__global__ __vector__` (vector core), NOT legacy `__aicore__`.
+  - Call `AscendC::InitSocState()` at kernel entry and `AscendC::PipeBarrier<PIPE_ALL>()` at exit.
+  - Allocate UB with `AscendC::LocalMemAllocator<AscendC::Hardware::UB>`, NOT legacy TPipe.
+  - Use `ascendc_assert` for device-side assertions.
+  - Use `AscendC::SetFlag<AscendC::HardEvent::...>` / `AscendC::WaitFlag<...>` for event sync.
+  - Use `AscendC::DataCopy` / `AscendC::DataCopyPad` for GM<->UB movement; tail blocks must be
+    handled safely (DataCopyPad or explicit tail tiling).
+
+  UB budgeting (mandatory):
+  - The UB budget is per AI core and must cover ALL live LocalTensor allocations
+    plus runtime overhead. Never allocate close to the full budget: keep total
+    UB usage <= 64 KB per core (the example uses 3 x 8 KB). Over-allocating UB
+    makes the kernel hang on device.
+
+  Pipeline safety (mandatory):
+  - Prefer separate UB buffers for inputs and outputs, as in the example.
+  - If one UB buffer is reused across loop iterations by both copy-in (MTE2) and
+    copy-out (MTE3) — e.g. single-buffer in-place compute — you MUST insert
+    `AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID0)` after the copy-out
+    and `AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID0)` before the next
+    iteration's copy-in, otherwise the kernel deadlocks on device.
+
+  Compute APIs verified to exist in this CANN version (namespace AscendC, signature
+  `Op(dst, src[, src2], count)`; do NOT invent others such as `Dup`):
+  - Binary: Add, Sub, Mul, Div, Max, Min
+  - Scalar: Adds, Muls, Maxs, Mins
+  - Unary: Relu, LeakyRelu, Exp, Abs, Sqrt, Reciprocal
+  - Anything else (Tanh, Sigmoid, GELU, Log, Softmax...) must be composed from the
+    above (e.g. sigmoid(x) = 1 / (1 + Exp(-x)); relu(x) = Maxs(x, 0)).

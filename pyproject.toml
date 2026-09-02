@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ascend-kernel-bench"
+version = "0.1.0"
+description = "Standardized benchmark for LLM-generated Ascend C operators on Huawei Ascend NPU"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openai,
+    "pydantic",
+    "rich",
+    "pyyaml",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# Examples live one level down (prompts/examples/<name>/<files>); the second
+# glob is what actually ships their contents.
+ascend_kernel_bench = ["prompts/examples/*", "prompts/examples/*/*"]
