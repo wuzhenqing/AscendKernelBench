@@ -1,4 +1,4 @@
-"""Run directory layout and result persistence (README 4.6).
+"""Run directory layout and result persistence (docs/guide/results.md).
 
 ``runs/{run_name}/`` holds generation_config.yaml, per-sample directories
 ``level{L}/{task}/sample_{i}/`` (prompt.txt, custom_op.asc, model_new.py,

@@ -9,7 +9,7 @@ description = "Standardized benchmark for LLM-generated Ascend C operators on Hu
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "openai,
+    "openai",
     "pydantic",
     "rich",
     "pyyaml",

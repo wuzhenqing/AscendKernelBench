@@ -1,4 +1,4 @@
-"""NPU Event timing with per-trial L2 clearing (README 3.6).
+"""NPU Event timing with per-trial L2 clearing (docs/guide/evaluation.md).
 
 Semantics follow KernelBench's ``time_execution_with_cuda_event`` ported to
 ``torch.npu``: warmup with synchronize, empty_cache, then per trial

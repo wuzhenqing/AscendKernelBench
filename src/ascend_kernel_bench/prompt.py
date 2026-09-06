@@ -1,4 +1,4 @@
-"""Component-based prompt construction (README 4.4).
+"""Component-based prompt construction (docs/reference/configuration.md).
 
 Pure-Python assembly, in order: problem_statement (the reference Model source
 code, exactly as KernelBench presents it), hardware_block (from the hardware

@@ -220,3 +220,7 @@ __marimo__/
 # AscendKernelBench run artifacts
 runs/
 
+# Documentation site
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/

@@ -1,4 +1,6 @@
-"""OpenAI-compatible LLM client with pydantic-structured output (README 3.9).
+"""OpenAI-compatible LLM client with pydantic-structured output.
+
+See docs/deploy_llm_service.md for the endpoint and response contracts.
 
 The endpoint is whatever ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY`` point to.
 Structured generation uses the OpenAI ``parse`` API with a pydantic model so
@@ -34,7 +36,7 @@ def _strip_fence(value: str) -> str:
 
 
 class AscendCGeneration(BaseModel):
-    """The two code deliverables of one generation (README 4.3)."""
+    """The two code deliverables of one generation (docs/task_authoring.md)."""
 
     custom_op_asc: str = Field(
         description=(

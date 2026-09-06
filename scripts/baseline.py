@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Measure torch_npu eager baselines and archive them per hardware profile.
 
-Baselines are measured on this machine (README 3.6) and archived to
+Baselines are measured on this machine (docs/guide/evaluation.md) and archived to
 results/baseline/{hardware}/{task_slug}.json so runs stay comparable across
 sessions. Evaluation itself always re-measures the reference live in the same
 worker; the archive is the cross-run record.

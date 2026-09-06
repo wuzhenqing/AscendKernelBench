@@ -1,4 +1,6 @@
-"""Scoring: fast_p and pass@k (README 3.6), KernelBench-compatible schema.
+"""Scoring: fast_p and pass@k, KernelBench-compatible schema.
+
+See docs/guide/results.md for scoring rules and result interpretation.
 
 ``eval_results.json`` maps problem_id -> list of per-sample dicts with
 ``sample_id``, ``compiled``, ``correctness``, ``metadata``, ``runtime``,
@@ -41,7 +43,7 @@ def fast_p(samples: Sequence[dict]) -> dict[str, float]:
     correct samples without an NPU baseline (CPU-reference mode, where no
     speedup exists) and samples flagged for excessive speedup — the flag only
     excludes them from the p > 0 speedup thresholds and the geometric mean
-    (README section 5: marked for manual review, not auto-failed).
+    (docs/guide/results.md: marked for manual review, not auto-failed).
     """
     total = len(samples)
     if total == 0:

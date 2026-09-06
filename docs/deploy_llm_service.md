@@ -1,37 +1,95 @@
-# 本地推理服务部署指南
+# Connect an LLM service
 
-AscendKernelBench 的 LLM 接口为 OpenAI 兼容协议（README 3.9）。任何提供
-OpenAI 兼容端点的服务都可使用，通过环境变量接入：
+AscendKernelBench generates code through an OpenAI-compatible Chat Completions endpoint. You can use a hosted provider or a separately deployed inference server. The benchmark does not start or manage an inference service.
 
-```bash
-export OPENAI_BASE_URL=http://<host>:<port>/v1
-export OPENAI_API_KEY=<your-key>
-```
+Generation only reads task source and writes candidate files. It can run on macOS with the project's Python dependencies and access to your endpoint. Compiling and evaluating the generated Ascend C code requires a configured Linux Ascend host.
 
-## 关键约束：NPU 物理分卡
+## Configure the connection
 
-**部署推理服务占用的 NPU 与评测使用的 NPU 必须物理分离，不得同卡。**
-推理服务常驻显存会与评测进程争抢 HBM，导致计时失真甚至 OOM。
-
-- 推理服务示例（8 卡机的 4-7 号卡）：
-  `ASCEND_RT_VISIBLE_DEVICES=4,5,6,7 vllm serve ...`
-- 评测进程示例（0 号卡）：
-  `ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py ...`
-
-## vLLM-Ascend 部署示例
-
-参考 [vLLM-Ascend](https://github.com/vllm-project/vllm-ascend) 官方文档安装后：
+Set the endpoint's API base URL and credential in the shell that runs generation. Replace the example values with those supplied by your service:
 
 ```bash
-ASCEND_RT_VISIBLE_DEVICES=4,5,6,7 \
-python -m vllm.entrypoints.openai.api_server \
-    --model <model-path> --tensor-parallel-size 4 --port 8000
+export OPENAI_BASE_URL='https://your-service.example/v1'
+export OPENAI_API_KEY='replace-with-your-service-key'
 ```
 
-然后 `OPENAI_BASE_URL=http://127.0.0.1:8000/v1`。
+Use the **API base URL**, not a full `/chat/completions` URL. Some services use a different base path; follow that service's documentation. A server without authentication may still require a nonempty placeholder key for the client; use the value prescribed by its operator. Keep real credentials out of configuration files committed to Git.
 
-## 远程服务
+Choose a model identifier exposed by your endpoint:
 
-直接使用远程 OpenAI 兼容服务（如本项目测试用的 deepseek-v4-flash）时，
-评测机无需为推理预留 NPU，但仍建议记录所用模型版本于
-`runs/{run_name}/generation_config.yaml`（框架自动完成）。
+```bash
+python scripts/generate.py \
+  --task level1/19_ReLU \
+  --model your-served-model \
+  --hardware ascend910b2 \
+  --n-samples 1 \
+  --run-name endpoint_smoke
+```
+
+This command makes real API requests and saves one candidate. It does not compile or evaluate the candidate. A successful response checks the connection and basic response structure; it does not establish kernel correctness.
+
+`--model` overrides `generation.model` in the evaluation YAML. The checked-in default is `deepseek-v4-flash`; this is a configuration value, not a guarantee that your service offers the model. There are no provider-specific adapters or `--base-url` / `--api-key` CLI options.
+
+## Response format and retries
+
+The client first requests a structured response with two string fields:
+
+| Field | Required content |
+| --- | --- |
+| `custom_op_asc` | The complete `custom_op.asc` source, including the kernel, host launcher, and `PYBIND11_MODULE` binding. |
+| `model_new_py` | The complete `model_new.py` source defining `ModelNew`. |
+
+If the structured request or parsing fails, the client makes a plain Chat Completions request and extracts fenced code blocks. It recognizes filename tags (`custom_op.asc`, `model_new.py`), then language tags (`cpp` / `asc`, `python`), and finally the first two blocks in Ascend C then Python order. A raw JSON answer to this fallback request is not decoded as JSON.
+
+Both paths strip outer Markdown fences and check for these minimum markers:
+
+- Ascend C: `PYBIND11_MODULE`, `__global__`, and `__vector__`.
+- Python: `class ModelNew`.
+
+These are content checks. The more detailed static checks run during evaluation, before compilation. See [task and candidate contracts](/task_authoring).
+
+The generation loop permits one retry after an invalid result or exception. Each attempt may include both a structured and a plain request, and the SDK may perform additional transport retries. One requested sample therefore does not necessarily equal one API request. The plain fallback is attempted after any structured-path exception, including connection and authentication errors, so inspect the underlying error when troubleshooting.
+
+The client sends `temperature` and `max_tokens`; the selected model and endpoint must accept those parameters. The CLI exposes `--temperature`, while `generation.max_tokens` is set in YAML. The client constructor's default request timeout is 600 seconds; it has no dedicated CLI option and is independent of the NPU evaluation timeouts.
+
+## Saved generation artifacts
+
+For the example above, a successful sample is saved under:
+
+```text
+runs/endpoint_smoke/
+├── generation_config.yaml
+└── level1/19_ReLU/sample_0/
+    ├── prompt.txt
+    ├── custom_op.asc
+    ├── model_new.py
+    └── response_raw.txt
+```
+
+`response_raw.txt` is written when the returned response text is nonempty. `prompt.txt` contains the assembled benchmark prompt; the client adds its system message and structured-response instruction when submitting the request.
+
+`generation_config.yaml` records the requested model identifier, sampling settings, hardware profile, and tasks. It does not capture the endpoint, immutable model revision, server configuration, token usage, or request IDs. Record relevant nonsecret service details alongside a published experiment if you need to reproduce it.
+
+Use a new run name for a new experiment. Generation writes existing sample paths again, and creating a run replaces its generation configuration. Failed generation attempts print errors but do not create failure records. The final `saved/total` count is therefore part of checking that generation completed.
+
+## Self-hosted inference and device isolation
+
+For an Ascend-hosted service, use the installation and model-serving instructions for your chosen release in the [official vLLM Ascend documentation](https://docs.vllm.ai/projects/ascend/en/latest/). Select a compatible serving stack independently of the benchmark's build environment. Once the service is available, connect through the same environment variables above.
+
+**An active inference server and benchmark workers must use separate physical NPUs.** Shared memory, compute, and bandwidth can cause out-of-memory failures and invalidate timing. Separate Python processes alone do not provide device isolation.
+
+For example, an operator might reserve physical devices 4–7 for inference and physical device 0 for benchmarking. Restrict device visibility before starting each service or worker, then select the appropriate device in that process's visible device set:
+
+```bash
+# Run on the Linux Ascend evaluation host after preparing its environment.
+ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py \
+  --run-name endpoint_smoke \
+  --hardware ascend910b2 \
+  --device npu:0
+```
+
+Confirm the physical allocation and visible device mapping on your host. AscendKernelBench inherits `ASCEND_RT_VISIBLE_DEVICES` but does not check whether another process uses the same card. The batch evaluator processes samples sequentially; it is not a multi-device scheduler. You can also generate all samples first, stop the inference service, and evaluate afterward on an otherwise idle device.
+
+The `ascend950pr` profile is reserved and requires hardware and toolchain validation before use. Its presence in the configuration directory does not establish support for either model serving or kernel evaluation.
+
+For connection errors, missing sample files, and evaluation failures, see [troubleshooting](/guide/troubleshooting).

@@ -1,5 +1,7 @@
-"""Evaluation pipeline (README 4.5): static check -> build -> correctness ->
+"""Evaluation pipeline: static check -> build -> correctness ->
 timing, each sample evaluated in an isolated worker subprocess.
+
+See docs/guide/evaluation.md for the evaluation protocol.
 
 The host entry (:func:`eval_sample`) writes a config JSON, spawns
 ``python -m ascend_kernel_bench.worker`` as a process-group leader via
@@ -452,7 +454,7 @@ def eval_sample_on_device(
             "metadata": metadata,
         }
 
-    # --- Performance (README 3.6): NPU Event, L2 clear per trial ---
+    # --- Performance: NPU Event, L2 clear per trial (docs/guide/evaluation.md) ---
     runtime = runtime_stats = ref_runtime = ref_runtime_stats = None
     if measure_performance:
         # Fresh inputs per trial defeat result-caching cheats, but regenerating

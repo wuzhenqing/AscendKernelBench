@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Batch generation: LLM generates n samples per task, saved to runs/{run_name}/.
 
-Generation is decoupled from evaluation (README 3.6): samples land on disk
+Generation is decoupled from evaluation (docs/guide/workflows.md): samples land on disk
 and can be evaluated repeatedly, on this or another machine.
 
 Example:

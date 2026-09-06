@@ -1,6 +1,6 @@
 """Build LLM-generated Ascend C sources with the fixed CMake project.
 
-The build contract (README 3.1/3.3): the LLM writes a single self-contained
+The build contract (docs/task_authoring.md): the LLM writes a single self-contained
 ``custom_op.asc``; this module copies ``build_template/CMakeLists.txt`` into
 the sample work directory, injects ``CMAKE_ASC_ARCHITECTURES`` from the
 hardware profile, and produces an importable ``custom_op`` Python extension.

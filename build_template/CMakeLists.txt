@@ -1,6 +1,6 @@
 # AscendKernelBench fixed CMake build project.
 #
-# Contract (README 3.1/3.3): every task's LLM-generated operator lives in a
+# Contract (docs/task_authoring.md): every task's LLM-generated operator lives in a
 # single self-contained `custom_op.asc`; the built Python extension module is
 # always named `custom_op`. The build system is task-agnostic: build.py copies
 # this file into the sample work directory and injects the target architecture

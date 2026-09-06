@@ -1,0 +1,143 @@
+# Evaluation protocol
+
+Evaluation builds a generated Ascend C extension, checks it against the reference task, and optionally measures NPU latency. It requires a configured Ascend machine with CANN, PyTorch, and `torch_npu`. macOS can prepare samples and inspect existing results, but it cannot execute this protocol on an Ascend NPU.
+
+This page describes the current implementation. No NPU evaluation was performed as part of the documentation update.
+
+## Run evaluation
+
+After generation has populated `runs/my_run/`, run:
+
+```bash
+python scripts/evaluate.py \
+  --run-name my_run \
+  --hardware ascend910b2 \
+  --device npu:0
+```
+
+The hardware profile selects the compiler architecture; `--device` selects the runtime device. Choose both to match the target machine. The profile is not automatic hardware detection.
+
+To build and check correctness without measuring latency:
+
+```bash
+python scripts/evaluate.py --run-name my_run --device npu:0 --no-perf
+```
+
+`--no-perf` still compiles and executes the candidate on the NPU. It is not a CPU or macOS evaluation mode. It also skips the post-timing fresh-input check because no timing phase runs.
+
+Use `--config path/to/eval.yaml` for a different configuration. The default values are:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `hardware` | `ascend910b2` | Hardware profile unless overridden by `--hardware`. |
+| `seed` | `42` | Base seed for initialization, correctness seed generation, and timing. |
+| `precision` | `fp32` | Floating-point input/model dtype. |
+| `num_correct_trials` | `5` | All initial correctness trials must pass. |
+| `num_warmup` | `3` | Warmup calls per timed model. |
+| `num_perf_trials` | `100` | Retained NPU-event measurements per timed model. |
+| `excessive_speedup` | `10.0` | Speedups strictly above this value are flagged for review. |
+| `build_timeout` | `600` seconds | Separate budget for CMake configure and CMake build. |
+| `eval_timeout` | `300` seconds | Additional time included in the overall worker budget. |
+
+The batch evaluator visits every complete sample directory sequentially and re-evaluates existing samples; it has no resume/skip flag. Re-evaluation overwrites each `eval_result.json` and rebuilds aggregate files. Preserve a copy of a run before measuring it on another device or with different settings.
+
+## Worker and build lifecycle
+
+For each sample, the host checks that `custom_op.asc` and `model_new.py` exist and applies the [candidate static checks](/task_authoring#candidate-rules-and-checks). A static violation produces a failed result without launching the worker.
+
+An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. The worker builds the operator using the fixed `build_template/CMakeLists.txt`, loads the task and `ModelNew`, and runs correctness and timing. Results travel through a temporary JSON file rather than standard output.
+
+The host allows `eval_timeout + 2 * build_timeout` seconds for the whole worker: 1,500 seconds with the defaults. There is no separate 300-second timer started after compilation. On an overall timeout, the host attempts to kill the worker's entire process group and records a failure.
+
+The build writes `custom_op.asc`, copies the fixed CMake template into the sample directory, and passes the profile's `cmake_arch` as `CMAKE_ASC_ARCHITECTURES`. CMake locates PyTorch, `torch_npu`, and pybind11 through the active Python interpreter. Configure and build logs are stored under `sample_*/build/`.
+
+The build environment helper sources `CANN_SET_ENV`, defaulting to `/usr/local/Ascend/cann-9.1.0/set_env.sh`, if that file exists; otherwise it uses the current environment. Prepare the runtime environment before launching evaluation, because the worker imports `torch_npu` before the build helper runs.
+
+Subprocess separation prevents ordinary worker failures from directly sharing interpreter state with the host. It does not restrict the worker's filesystem, network, or operating-system privileges. Static checks and timeouts are not a security sandbox.
+
+## Correctness
+
+The worker seeds PyTorch and the NPU RNG, calls `get_init_inputs()`, and re-seeds before separately constructing `ModelNew` and `Model`. Both models enter `eval()` mode. Parameters are reproduced through identical seeded initialization, not copied from the reference.
+
+It then derives `num_correct_trials` seeds from the base seed. For every trial:
+
+1. Seed the generators and call `get_inputs()`.
+2. Move top-level tensor arguments to the NPU, casting floating tensors to the configured precision while preserving integer/Boolean dtypes.
+3. Reset the seed after input generation and synchronize the device.
+4. Run the reference and synchronize.
+5. Snapshot the current tensor inputs, run the candidate, and synchronize.
+6. Reject candidate input mutation and compare the outputs.
+
+A candidate exception or detected input mutation fails the sample immediately. Output mismatches are recorded while subsequent trials continue. Correctness requires every initial trial to pass.
+
+### Comparison and tolerances
+
+Default tolerances are:
+
+| Precision | Absolute tolerance | Relative tolerance |
+| --- | --- | --- |
+| `fp32` | `1e-4` | `1e-4` |
+| `fp16` | `1e-2` | `1e-2` |
+| `bf16` | `1e-2` | `1e-2` |
+
+Tensor shapes must match. Floating-point/complex tensors use `torch.allclose`; pairs of integer/Boolean tensors use `torch.equal`. The default matcher handles tuple/list outputs recursively. A nonempty task `TOLERANCE` overrides configured tolerances, and `custom_check(ref, out)` replaces the default comparison entirely. See [task authoring](/task_authoring#precision-and-output-checks) for contract limits.
+
+### CPU reference fallback
+
+The preferred reference is eager PyTorch with `torch_npu` on the same NPU and in the same precision as the candidate. If reference construction fails, or a reference forward/synchronization raises during any initial correctness trial, the worker switches to a CPU reference for that and subsequent trials. It does not rerun earlier successful trials.
+
+CPU fallback uses the task's CPU model and float32 floating-point inputs; the candidate still runs on the NPU. Candidate outputs are transferred to CPU for comparison. Metadata records `reference: "cpu"` and the NPU exception in `reference_npu_error`.
+
+This fallback catches any exception in those reference stages, including causes other than unsupported operators. Inspect the error before interpreting a result as expanded operator coverage. A later reference failure during timing or the post-timing check does not activate this fallback.
+
+A correct CPU-reference sample contributes to correctness metrics. It can have a measured candidate latency, but has no NPU reference latency or speedup.
+
+## Timing
+
+Only samples passing the initial correctness trials enter timing. Candidate and NPU reference are measured separately in the same worker; the candidate is measured first. Evaluation always measures the reference live and does not read archived baseline JSON files.
+
+### Input refresh
+
+The evaluator measures the total size of top-level input tensors after transfer/casting:
+
+- At most 256 MiB: draw new inputs before every warmup and measured call. Keep the previous input set alive to discourage pointer reuse. Candidate and reference timing begin with the same RNG seed.
+- Above 256 MiB: reuse a fixed input set during timing to avoid repeatedly allocating very large tensors.
+
+The result records this choice in `metadata.timing_fresh_inputs`. Input preparation runs outside the NPU-event measurement window.
+
+### Event sequence
+
+For each timed model, the timer performs three warmups by default, synchronizing after each, then calls `torch.npu.empty_cache()` to release allocator caches. For every subsequent trial, it:
+
+1. Refreshes inputs when enabled and synchronizes the device.
+2. Creates a start/end NPU event pair.
+3. Thrashes L2 with a 256 MiB tensor fill before recording the start event.
+4. Records the start event, invokes the model, and records the end event.
+5. Synchronizes and reads elapsed event time in milliseconds.
+
+The first measured trial is discarded. With the defaults, there are 101 measured calls and 100 retained values per model, in addition to warmups. The L2-thrashing operation is outside the event window. The reported numbers are device-event latency for the invoked model, not end-to-end generation/build time or a host wall-clock benchmark.
+
+Statistics contain mean, standard deviation, minimum, maximum, and retained trial count. Numeric statistics are rounded to three significant digits before persistence. The scoring code computes speedup from the persisted means.
+
+### Post-timing check and flags
+
+After the timing attempt, the evaluator draws another input set using `seed + 1` and compares candidate and reference outputs again. A mismatch or exception marks the result incorrect, even when timings have already been collected. This check can expose cached outputs or state drift; it does not guarantee detection of every prohibited behavior. It does not repeat the input-mutation check used by the initial correctness trials.
+
+A timing exception is recorded in `metadata.runtime_error`. If the post-timing check succeeds, the result may remain correct with missing or partially populated timing fields.
+
+When both mean runtimes are available, a speedup strictly above `excessive_speedup` is marked for manual review. The flag does not automatically make the sample incorrect. It excludes the sample from positive `fast_p` thresholds and geometric mean speedup while preserving its contribution to `fast_0` and pass@k. See [results and scoring](/guide/results).
+
+## Archive a reference baseline
+
+On the Ascend machine:
+
+```bash
+python scripts/baseline.py \
+  --task level1/19_ReLU \
+  --hardware ascend910b2 \
+  --device npu:0
+```
+
+The archive is `results/baseline/{hardware}/{task_name}.json`. Supported references include timing statistics, `supported_on_npu: true`, and `timing_fresh_inputs`. Reference failures inside the measurement block produce `supported_on_npu: false` with an error string; worker-level failures are printed and may leave no archive.
+
+The baseline script uses the same timing helper and adaptive input refresh policy, but it does not evaluate candidates or provide CPU timing. Archives are useful records and are not the denominator used for evaluation speedups. Archive filenames omit the level, so equal task stems in different levels can collide; preserve such measurements separately.

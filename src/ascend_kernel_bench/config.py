@@ -12,7 +12,10 @@ from ._paths import EVAL_DEFAULT_CONFIG, HARDWARE_DIR
 
 @dataclass(frozen=True)
 class HardwareProfile:
-    """Hardware profile (README 3.8): CMake arch for builds, specs for prompts."""
+    """Hardware profile: CMake arch for builds, specs for prompts.
+
+    See docs/reference/configuration.md.
+    """
 
     name: str
     soc_version: str
@@ -43,7 +46,7 @@ class HardwareProfile:
 
 @dataclass(frozen=True)
 class EvalConfig:
-    """Evaluation defaults (README 3.5/3.6)."""
+    """Evaluation defaults (docs/reference/configuration.md)."""
 
     hardware: str = "ascend910b2"
     num_correct_trials: int = 5

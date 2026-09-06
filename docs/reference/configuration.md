@@ -1,0 +1,144 @@
+# Configuration
+
+Evaluation settings live in `configs/eval_default.yaml`. Hardware descriptions live in `configs/hardware/`. CLI scripts load these files using `src/ascend_kernel_bench/config.py`.
+
+## Precedence and loading
+
+1. A supplied CLI flag overrides the corresponding configuration setting.
+2. `--config PATH` loads that YAML file; otherwise, the repository's default file is loaded.
+3. Omitted top-level fields receive `EvalConfig` dataclass defaults. Generation scripts apply their own defaults for missing `generation` keys.
+
+A custom YAML file **replaces** the default file; the loader does not merge files. Nested mappings such as `tolerances` and `generation` are not recursively merged with the default YAML. Unknown top-level keys are silently ignored, so a misspelled key may appear to work while leaving the default in effect. The loader does not provide comprehensive value/range validation.
+
+CLI settings are not automatically recovered from an existing run's `generation_config.yaml`. In particular, select the correct hardware again when evaluating a saved run.
+
+## Evaluation settings
+
+| Key | Default | Behavior |
+| --- | --- | --- |
+| `hardware` | `ascend910b2` | Hardware profile name, unless overridden by `--hardware`. |
+| `num_correct_trials` | `5` | Number of seeded correctness trials. Every trial must pass. |
+| `seed` | `42` | Seed used for model initialization, correctness seed generation, and performance inputs. |
+| `precision` | `fp32` | Floating-point precision. Use `fp32`, `fp16`, or `bf16`. Integer and Boolean tensors retain their types. |
+| `tolerances` | See below | Absolute and relative tolerances by precision. |
+| `num_perf_trials` | `100` | Number of measured trials for each timed implementation. |
+| `num_warmup` | `3` | Number of warmup calls before measured trials. |
+| `excessive_speedup` | `10.0` | Flag speedup strictly above this ratio for review. Flagged samples remain eligible for correctness metrics but are excluded from speedup metrics. |
+| `build_timeout` | `600` | Seconds allowed for CMake configure and for build, separately. |
+| `eval_timeout` | `300` | Evaluation component of the host worker time budget; also the standalone baseline worker timeout. |
+
+The host evaluation worker timeout is `eval_timeout + 2 * build_timeout`: **1,500 seconds** with the defaults. This is an outer budget for the entire worker, not a separate 300-second timer around the runtime phase.
+
+Default tolerances are:
+
+```yaml
+tolerances:
+  fp32: {atol: 1.0e-4, rtol: 1.0e-4}
+  fp16: {atol: 1.0e-2, rtol: 1.0e-2}
+  bf16: {atol: 1.0e-2, rtol: 1.0e-2}
+```
+
+A task's nonempty `TOLERANCE` mapping takes precedence over configured tolerance values. A task can also define `custom_check(ref, out)` to control comparison. See the [task contract](/task_authoring) and [evaluation protocol](/guide/evaluation).
+
+Use positive trial counts and timeouts. Set `num_warmup` to a nonnegative integer. Configuration changes alter the evaluation protocol; preserve the exact YAML used when comparing results.
+
+## Generation settings
+
+These are nested under `generation`:
+
+| Key | Default | Used by |
+| --- | --- | --- |
+| `model` | `deepseek-v4-flash` | `generate.py`, `run_single.py` |
+| `temperature` | `0.0` | `generate.py`, `run_single.py` |
+| `max_tokens` | `16384` | `generate.py`, `run_single.py`; no CLI override |
+| `num_samples` | `1` | `generate.py` only |
+| `prompt_mode` | `one_shot` | `generate.py`, `run_single.py` |
+
+The model name is passed to your endpoint. Set it to a model your service supports. `zero_shot` omits examples, `one_shot` uses the first bundled example, and `few_shot` uses all bundled examples. There is currently one bundled example.
+
+For example, save the following as `configs/relu-experiment.yaml`:
+
+```yaml
+hardware: ascend910b2
+precision: fp32
+seed: 42
+num_correct_trials: 5
+num_warmup: 3
+num_perf_trials: 100
+excessive_speedup: 10.0
+build_timeout: 600
+eval_timeout: 300
+tolerances:
+  fp32: {atol: 1.0e-4, rtol: 1.0e-4}
+  fp16: {atol: 1.0e-2, rtol: 1.0e-2}
+  bf16: {atol: 1.0e-2, rtol: 1.0e-2}
+generation:
+  model: your-served-model-name
+  temperature: 0.7
+  max_tokens: 16384
+  num_samples: 10
+  prompt_mode: one_shot
+```
+
+Use the same configuration explicitly for generation and evaluation:
+
+```bash
+python scripts/generate.py \
+  --task level1/19_ReLU \
+  --config configs/relu-experiment.yaml \
+  --run-name relu-experiment
+
+# Run on the Ascend host after transferring the run and configuration.
+python scripts/evaluate.py \
+  --run-name relu-experiment \
+  --config configs/relu-experiment.yaml \
+  --device npu:0
+```
+
+## Hardware profiles
+
+The supplied files describe these targets:
+
+| Profile | Stored `soc_version` | Stored `cmake_arch` | Status |
+| --- | --- | --- | --- |
+| `ascend910b2` | `Ascend910B2` | `dav-2201` | Default profile in this repository. Validate against the machine and installed toolchain. |
+| `ascend950pr` | `Ascend950PR` | `dav-3510` | Reserved profile; its file explicitly requires specification validation before use. |
+
+These are configuration values, not automatic hardware detection or a claim that every target has passed validation. Selecting a profile does not change the NPU exposed by `--device`.
+
+| Profile field | Required | Meaning |
+| --- | --- | --- |
+| `name` | Yes | Result label and baseline archive directory name. |
+| `soc_version` | Yes | SoC label included in the prompt. |
+| `cmake_arch` | Yes | Passed to `CMAKE_ASC_ARCHITECTURES` during compilation. |
+| `ai_core_num` | Yes | Core-count value included in the prompt. |
+| `ub_size_kb` | Yes | Per-core UB capacity description included in the prompt. |
+| `l2_cache_mb` | No; defaults to `0` | Retained in the loaded profile; the current timing code does not size its cache-flush buffer from this value. |
+| `hbm_gb` | No; defaults to `0` | HBM capacity description included in the prompt. |
+| `memory_bandwidth_gbps` | No; defaults to `0` | Bandwidth description included in the prompt. |
+| `supported_dtypes` | No; defaults to `[]` | Data type names included in the prompt; does not itself enforce runtime support. |
+| `api_style` | No; defaults to an empty string | Free-form instructions inserted into the hardware prompt block. |
+
+The loader reads only these fields. Additional keys such as the default profile's `cube_core_num` and `vector_core_num` are not separate fields in `HardwareProfile` and are not independently injected into the prompt.
+
+Pass a custom profile with `--hardware configs/hardware/my-device.yaml`, or save it under `configs/hardware/my-device.yaml` and use `--hardware my-device`. An existing file path is tried first, relative to the current working directory when applicable; otherwise, the loader looks for `<repository>/configs/hardware/<value>.yaml`.
+
+## Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `OPENAI_BASE_URL` | Endpoint URL used by `LLMClient`. The CLI has no endpoint URL flag. |
+| `OPENAI_API_KEY` | Credential passed to the endpoint client. The CLI has no API key flag. |
+| `CANN_SET_ENV` | Path to the environment script used by the build helper. Defaults to `/usr/local/Ascend/cann-9.1.0/set_env.sh`. |
+| `AKB_REPO_ROOT` | Override the root used for configs, tasks, build templates, results, and runs. Set it before starting Python. |
+| `ASCEND_SLOG_PRINT_TO_STDOUT` | The build/evaluation code defaults this to `0` in child environments when it is unset, to reduce runtime log output. |
+
+If the selected CANN environment script exists, the build helper sources it through Bash and caches the resulting environment for that process. If it does not exist, the helper uses the current environment. Source the appropriate CANN script in your shell before running the evaluator so Python imports and worker startup can also use it.
+
+The default repository root is derived from the source package location. A checkout installation is the supported workflow documented here. If you install the Python package elsewhere, keep a checkout containing the external data directories and set:
+
+```bash
+export AKB_REPO_ROOT=/absolute/path/to/AscendKernelBench
+```
+
+This redirects data paths; it does not install the scripts, change the working directory, or select a Python environment. The `scripts/*.py` launchers still load source from their own checkout. See [architecture](/reference/architecture) for the repository layout.

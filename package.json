@@ -1,0 +1,22 @@
+{
+  "name": "ascend-kernel-bench-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "docs:check": "npm run docs:build && node scripts/check_docs.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  },
+  "overrides": {
+    "vitepress": {
+      "vite": "6.4.3"
+    }
+  }
+}

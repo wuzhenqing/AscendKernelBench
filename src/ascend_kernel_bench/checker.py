@@ -1,4 +1,4 @@
-"""Static anti-cheat checks for generated samples (README section 5).
+"""Static anti-cheat checks for generated samples (docs/guide/evaluation.md).
 
 Two entry points:
 
