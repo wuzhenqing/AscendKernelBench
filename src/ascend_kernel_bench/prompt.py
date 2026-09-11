@@ -8,9 +8,16 @@ zero_shot / one_shot (default) / few_shot.
 
 The example block teaches the Ascend C language itself — kernel class
 structure, ``__global__ __vector__``, UB budgeting and tiling, host launch,
-pybind binding — because Ascend C is scarce in LLM corpora. Task semantics
-are NOT spelled out beyond the Model source: mapping a PyTorch reference to
-an Ascend C operator is precisely the capability under test.
+and the process-local ``TORCH_LIBRARY`` binding — because Ascend C is scarce
+in LLM corpora. Task semantics are NOT spelled out beyond the Model source:
+mapping a PyTorch reference to an Ascend C operator is precisely the
+capability under test.
+
+Prompts describe the implemented ACLNN operator-project path: a fixed modern
+CMake project builds ``libcustom_op.so`` and the evaluator calls
+``torch.ops.load_library`` on that file. Do not ask the model for pybind11,
+an OPP / custom_opp install project, or JIT compilation. JIT mode is reserved
+and is not prompted here.
 """
 
 from __future__ import annotations
@@ -20,17 +27,26 @@ from dataclasses import dataclass
 from ._paths import PROMPT_EXAMPLES_DIR
 from .config import HardwareProfile
 from .dataset import Task
+from .modes import ACLNN_MODE, require_implemented_mode
 
 SYSTEM_PROMPT = (
     "You are an expert Ascend C kernel engineer. You write correct, "
-    "high-performance Ascend C operators for Huawei Ascend NPUs, compiled "
-    "through a fixed CMake + pybind11 pipeline."
+    "high-performance Ascend C operators for Huawei Ascend NPUs. The "
+    "benchmark compiles your operator with a fixed modern CMake project into "
+    "a process-local shared library (libcustom_op.so) and loads it with "
+    "torch.ops.load_library inside the evaluating PyTorch process. Register "
+    "the operator with TORCH_LIBRARY / TORCH_LIBRARY_IMPL. Do not use "
+    "pybind11. The library is never installed into site-packages or the "
+    "global CANN OPP path."
 )
 
 OUTPUT_CONTRACT = """\
 ## Output Contract
 
-You must output exactly two fenced code blocks, tagged with their filenames:
+The benchmark already owns the CMake operator project. You must NOT emit
+CMakeLists.txt, build.sh, op_host / op_kernel trees, framework plugins,
+custom_opp packages, or any install / pip / OPP deployment step. Output
+exactly two fenced code blocks, tagged with their filenames:
 
 1. ```custom_op.asc — one self-contained Ascend C source file with four parts:
    a. kernel class: `Init` (data partition across cores, GM buffers) and
@@ -40,15 +56,25 @@ You must output exactly two fenced code blocks, tagged with their filenames:
    c. host wrapper taking `const at::Tensor&` arguments, fetching the current
       NPU stream via `c10_npu::getCurrentNPUStream().stream(false)`,
       allocating outputs, launching with `<<<numBlocks, 0, stream>>>`;
-   d. `PYBIND11_MODULE(custom_op, m)` exporting the host function(s).
-   The module name MUST be `custom_op`. Exported function names are free
-   (`run` is the convention); multi-kernel tasks may export several entries.
-   The host wrapper may only allocate memory and launch kernels — all compute
-   must happen inside the Ascend C kernel, never in host-side ATen calls
-   (`at::matmul`, `tensor.relu()`, ...) or vendor prebuilt ops (`aclnn*`).
+   d. a process-local torch.library binding. Register the host function with
+      `TORCH_LIBRARY(custom_op, m)` and bind the NPU implementation with
+      `TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, m)`. Do NOT use
+      `PYBIND11_MODULE` or any pybind11 header. The evaluator will
+      `torch.ops.load_library` the resulting `libcustom_op.so`.
+   The library namespace MUST be `custom_op`. Exported function names are
+   free (`run` is the convention); multi-kernel tasks may export several
+   entries. Schema strings must match the host function (for example
+   `run(Tensor x, Tensor y) -> Tensor`). The host wrapper may only allocate
+   memory and launch kernels — all compute must happen inside the Ascend C
+   kernel, never in host-side ATen calls (`at::matmul`, `tensor.relu()`,
+   ...) or vendor prebuilt ops (`aclnn*`). Do not call `cmake --install` or
+   write files outside this source.
 2. ```model_new.py — class `ModelNew` with the SAME `__init__` and `forward`
-   signatures as the reference `Model`. It is a thin wrapper: import
-   `custom_op` and call the compiled operator. Keep all optimisation work in
+   signatures as the reference `Model`. It is a thin wrapper: call
+   `torch.ops.custom_op.run(...)` (or the names you exported). The evaluator
+   already loaded `libcustom_op.so` with `torch.ops.load_library`. Do not
+   `import custom_op`, do not call `torch.ops.load_library`, do not change
+   `sys.path`, and do not install anything. Keep all optimisation work in
    the `.asc` file.
    - Parameters: if the reference `Model` has parameters (e.g. `nn.Conv2d`,
      `nn.Linear`, norm layers), you MAY instantiate the same `nn` modules in
@@ -59,7 +85,7 @@ You must output exactly two fenced code blocks, tagged with their filenames:
 
 Do not output any test code, `if __name__ == "__main__"` blocks, or prose
 between the two code blocks. In model_new.py, ALL tensor compute must go
-through `custom_op`: no torch native operators in any form — free functions
+through `torch.ops.custom_op`: no torch native operators in any form — free functions
 (`torch.matmul`), tensor methods (`x.softmax(...)`), operators (`A @ B`,
 `A + B` on tensors), or comparisons on tensor data — and no nn.functional,
 torch_npu/aclnn shortcuts, CPU/NumPy fallbacks, try/except, dynamic imports
@@ -72,8 +98,10 @@ INSTRUCTION = """\
 
 Implement the operator defined by the reference model above in Ascend C.
 Generate real, compilable code: every API you use must exist in the new-style
-Ascend C API shown in the example. Output only the two code blocks defined by
-the Output Contract.
+Ascend C API shown in the example. The evaluator will compile this file with
+its fixed CMake project into libcustom_op.so and load that library with
+torch.ops.load_library; you only write the two code blocks defined by the
+Output Contract.
 """
 
 
@@ -156,8 +184,10 @@ def build_prompt(
     *,
     mode: str = "one_shot",
     examples: list[PromptExample] | None = None,
+    operator_mode: str = ACLNN_MODE,
 ) -> str:
     """Assemble the full generation prompt for one task."""
+    require_implemented_mode(operator_mode)
     if mode not in {"zero_shot", "one_shot", "few_shot"}:
         raise ValueError(f"Unknown prompt mode: {mode}")
     components = [_problem_statement(task), _hardware_block(hardware)]

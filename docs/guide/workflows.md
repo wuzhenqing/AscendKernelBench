@@ -23,7 +23,7 @@ The command processes tasks and samples sequentially. Sample IDs start at zero f
 
 Generation requests structured output first and falls back to fenced code blocks if that request fails. The client checks for basic source markers and can retry an invalid generation once. These retries address response generation or formatting; they do not use compiler or correctness feedback to repair the operator.
 
-`one_shot` includes the first bundled example; `few_shot` includes every bundled example. The current checkout contains one example, so these modes currently include the same example content. `zero_shot` omits examples.
+`one_shot` includes the first bundled example; `few_shot` includes every bundled example. The current checkout ships an elementwise-add example and a LeakyReLU example. `zero_shot` omits examples.
 
 ::: warning Preserve separate experiments
 Use a new run name for each experiment. Reusing a name overwrites `generation_config.yaml` and matching sample source files, while old samples, build artifacts, and evaluation results can remain. Reusing a directory is not a clean restart.

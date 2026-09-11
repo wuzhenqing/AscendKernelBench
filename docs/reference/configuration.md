@@ -26,6 +26,7 @@ CLI settings are not automatically recovered from an existing run's `generation_
 | `excessive_speedup` | `10.0` | Flag speedup strictly above this ratio for review. Flagged samples remain eligible for correctness metrics but are excluded from speedup metrics. |
 | `build_timeout` | `600` | Seconds allowed for CMake configure and for build, separately. |
 | `eval_timeout` | `300` | Evaluation component of the host worker time budget; also the standalone baseline worker timeout. |
+| `operator_mode` | `aclnn` | How generated Ascend C is turned into a callable operator. `aclnn` builds a process-local `libcustom_op.so` and loads it in the evaluating PyTorch process. `jit` is reserved and not implemented. |
 
 The host evaluation worker timeout is `eval_timeout + 2 * build_timeout`: **1,500 seconds** with the defaults. This is an outer budget for the entire worker, not a separate 300-second timer around the runtime phase.
 
@@ -54,7 +55,7 @@ These are nested under `generation`:
 | `num_samples` | `1` | `generate.py` only |
 | `prompt_mode` | `one_shot` | `generate.py`, `run_single.py` |
 
-The model name is passed to your endpoint. Set it to a model your service supports. `zero_shot` omits examples, `one_shot` uses the first bundled example, and `few_shot` uses all bundled examples. There is currently one bundled example.
+The model name is passed to your endpoint. Set it to a model your service supports. `zero_shot` omits examples, `one_shot` uses the first bundled example, and `few_shot` uses all bundled examples. The repository currently ships two examples (elementwise add and LeakyReLU).
 
 For example, save the following as `configs/relu-experiment.yaml`:
 
@@ -68,6 +69,7 @@ num_perf_trials: 100
 excessive_speedup: 10.0
 build_timeout: 600
 eval_timeout: 300
+operator_mode: aclnn
 tolerances:
   fp32: {atol: 1.0e-4, rtol: 1.0e-4}
   fp16: {atol: 1.0e-2, rtol: 1.0e-2}
@@ -131,6 +133,7 @@ Pass a custom profile with `--hardware configs/hardware/my-device.yaml`, or save
 | `OPENAI_API_KEY` | Credential passed to the endpoint client. The CLI has no API key flag. |
 | `CANN_SET_ENV` | Path to the environment script used by the build helper. Defaults to `/usr/local/Ascend/cann-9.1.0/set_env.sh`. |
 | `AKB_REPO_ROOT` | Override the root used for configs, tasks, build templates, results, and runs. Set it before starting Python. |
+| `AKB_ENABLE_CCACHE` | When set to `1` / `true` / `yes` / `on`, the ACLNN CMake configure step receives `-DENABLE_CCACHE=ON`. |
 | `ASCEND_SLOG_PRINT_TO_STDOUT` | The build/evaluation code defaults this to `0` in child environments when it is unset, to reduce runtime log output. |
 
 If the selected CANN environment script exists, the build helper sources it through Bash and caches the resulting environment for that process. If it does not exist, the helper uses the current environment. Source the appropriate CANN script in your shell before running the evaluator so Python imports and worker startup can also use it.

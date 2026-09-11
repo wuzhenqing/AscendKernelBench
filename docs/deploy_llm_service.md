@@ -36,15 +36,15 @@ The client first requests a structured response with two string fields:
 
 | Field | Required content |
 | --- | --- |
-| `custom_op_asc` | The complete `custom_op.asc` source, including the kernel, host launcher, and `PYBIND11_MODULE` binding. |
+| `custom_op_asc` | The complete `custom_op.asc` source, including the kernel, host launcher, and a process-local `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL` binding. |
 | `model_new_py` | The complete `model_new.py` source defining `ModelNew`. |
 
 If the structured request or parsing fails, the client makes a plain Chat Completions request and extracts fenced code blocks. It recognizes filename tags (`custom_op.asc`, `model_new.py`), then language tags (`cpp` / `asc`, `python`), and finally the first two blocks in Ascend C then Python order. A raw JSON answer to this fallback request is not decoded as JSON.
 
 Both paths strip outer Markdown fences and check for these minimum markers:
 
-- Ascend C: `PYBIND11_MODULE`, `__global__`, and `__vector__`.
-- Python: `class ModelNew`.
+- Ascend C: `__global__`, `__vector__`, `TORCH_LIBRARY`, and `TORCH_LIBRARY_IMPL`.
+- Python: `class ModelNew` and `torch.ops.custom_op`.
 
 These are content checks. The more detailed static checks run during evaluation, before compilation. See [task and candidate contracts](/task_authoring).
 

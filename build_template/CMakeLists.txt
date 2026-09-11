@@ -1,13 +1,24 @@
-# AscendKernelBench fixed CMake build project.
+# AscendKernelBench ACLNN operator project (process-local shared library).
 #
-# Contract (docs/task_authoring.md): every task's LLM-generated operator lives in a
-# single self-contained `custom_op.asc`; the built Python extension module is
-# always named `custom_op`. The build system is task-agnostic: build.py copies
-# this file into the sample work directory and injects the target architecture
-# via -DCMAKE_ASC_ARCHITECTURES=<arch> from the hardware profile.
+# Contract: the LLM writes a single self-contained `custom_op.asc` that
+# registers with TORCH_LIBRARY / TORCH_LIBRARY_IMPL. This template — aligned
+# with the modern CMake + torch.library sample in asc-devkit — compiles that
+# file into libcustom_op.so. The evaluator then calls torch.ops.load_library
+# on that file inside the PyTorch process.
 #
-# Requires: CANN >= 9.1.0 environment (source <cann>/set_env.sh), torch,
-# torch_npu, pybind11 importable by the Python3 interpreter found by CMake.
+# Deliberately NOT an OPP/custom_opp package and NOT a pybind extension:
+#   - no npu_op_package / custom_opp_*.run
+#   - no pybind11 / PYBIND11_MODULE
+#   - CMAKE_SKIP_INSTALL_RULES is ON so `cmake --install` cannot write into
+#     site-packages or $ASCEND_OPP_PATH/vendors
+#   - RPATH is baked to $ORIGIN plus Torch / torch_npu / CANN lib dirs so
+#     loading does not require mutating a shared global environment
+#
+# Requires: CANN >= 9.1.0 (source <cann>/set_env.sh), torch and torch_npu
+# importable by the Python3 interpreter found by CMake.
+#
+# CMAKE_ASC_ARCHITECTURES is injected by build.py from the hardware profile
+# (e.g. dav-2201, dav-3510).
 
 cmake_minimum_required(VERSION 3.16)
 
@@ -16,15 +27,33 @@ if(NOT DEFINED CMAKE_ASC_ARCHITECTURES OR "${CMAKE_ASC_ARCHITECTURES}" STREQUAL 
 endif()
 set(CMAKE_ASC_ARCHITECTURES "${CMAKE_ASC_ARCHITECTURES}" CACHE STRING "NPU architecture" FORCE)
 
+# Never install this operator into the global Python or CANN tree.
+set(CMAKE_SKIP_INSTALL_RULES ON)
+
 find_package(ASC REQUIRED)
 project(custom_op_build LANGUAGES ASC CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# Optional ccache (same switch as the official ACLNN operator-project samples).
+# Enable from the evaluator with -DENABLE_CCACHE=ON.
+option(ENABLE_CCACHE "Enable ccache compiler launcher" OFF)
+if(ENABLE_CCACHE)
+    find_program(CCACHE_PROGRAM ccache)
+    if(CCACHE_PROGRAM)
+        message(STATUS "[ccache] Enabled: ${CCACHE_PROGRAM}")
+        set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+        set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    else()
+        message(WARNING "[ccache] ENABLE_CCACHE=ON but ccache was not found")
+    endif()
 endif()
 
 # Derive a GCC toolchain root for the ASC/bisheng front-end: when .asc sources
@@ -65,16 +94,15 @@ execute_process(
 set(TORCH_NPU_INCLUDE_DIRS ${TORCH_NPU_PATH}/include)
 set(TORCH_NPU_LIBRARIES ${TORCH_NPU_PATH}/lib)
 
-execute_process(
-    COMMAND ${CMAKE_COMMAND} -E env ASCEND_SLOG_PRINT_TO_STDOUT=0
-            ${Python3_EXECUTABLE} -c "import pybind11; print(pybind11.get_cmake_dir())"
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    OUTPUT_VARIABLE PYBIND11_CMAKE_PREFIX_PATH
-)
-find_package(pybind11 REQUIRED HINTS ${PYBIND11_CMAKE_PREFIX_PATH})
+# Shared library loaded with torch.ops.load_library (not a pybind module).
+add_library(custom_op SHARED custom_op.asc)
 
-# Module name MUST stay `custom_op` and match PYBIND11_MODULE in custom_op.asc.
-pybind11_add_module(custom_op SHARED custom_op.asc)
+set_target_properties(custom_op PROPERTIES
+    PREFIX "lib"
+    OUTPUT_NAME "custom_op"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
 
 target_include_directories(custom_op PRIVATE
     ${TORCH_INCLUDE_DIRS}
@@ -84,11 +112,34 @@ target_include_directories(custom_op PRIVATE
 target_link_libraries(custom_op PRIVATE
     ${TORCH_LIBRARIES}
     torch_npu
+    Python3::Python
 )
 
 target_link_directories(custom_op PRIVATE
     ${TORCH_NPU_LIBRARIES}
 )
+
+# Runtime search path: the .so is loaded from the sample directory, so it
+# must find Torch / torch_npu / CANN without a global install step.
+set(_CUSTOM_OP_RPATH "$ORIGIN")
+if(DEFINED TORCH_INSTALL_PREFIX AND NOT "${TORCH_INSTALL_PREFIX}" STREQUAL "")
+    list(APPEND _CUSTOM_OP_RPATH "${TORCH_INSTALL_PREFIX}/lib")
+endif()
+if(EXISTS "${TORCH_NPU_PATH}/lib")
+    list(APPEND _CUSTOM_OP_RPATH "${TORCH_NPU_PATH}/lib")
+endif()
+if(DEFINED ENV{ASCEND_HOME_PATH})
+    if(EXISTS "$ENV{ASCEND_HOME_PATH}/lib64")
+        list(APPEND _CUSTOM_OP_RPATH "$ENV{ASCEND_HOME_PATH}/lib64")
+    endif()
+    if(EXISTS "$ENV{ASCEND_HOME_PATH}/lib")
+        list(APPEND _CUSTOM_OP_RPATH "$ENV{ASCEND_HOME_PATH}/lib")
+    endif()
+endif()
+set_property(TARGET custom_op PROPERTY BUILD_RPATH ${_CUSTOM_OP_RPATH})
+set_property(TARGET custom_op PROPERTY INSTALL_RPATH ${_CUSTOM_OP_RPATH})
+set_property(TARGET custom_op PROPERTY BUILD_WITH_INSTALL_RPATH TRUE)
+message(STATUS "custom_op RPATH: ${_CUSTOM_OP_RPATH}")
 
 target_link_options(custom_op PRIVATE
     --gcc-toolchain=${GCC_TOOLCHAIN_ROOT}

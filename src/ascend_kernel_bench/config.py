@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from ._paths import EVAL_DEFAULT_CONFIG, HARDWARE_DIR
+from .modes import DEFAULT_OPERATOR_MODE, require_implemented_mode
 
 
 @dataclass(frozen=True)
@@ -64,12 +65,18 @@ class EvalConfig:
     excessive_speedup: float = 10.0
     build_timeout: int = 600
     eval_timeout: int = 300
+    operator_mode: str = DEFAULT_OPERATOR_MODE
     generation: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict) -> "EvalConfig":
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
-        return cls(**{k: v for k, v in data.items() if k in known})
+        filtered = {k: v for k, v in data.items() if k in known}
+        if "operator_mode" in filtered:
+            filtered["operator_mode"] = require_implemented_mode(
+                filtered["operator_mode"]
+            )
+        return cls(**filtered)
 
 
 def load_hardware_profile(name_or_path: str) -> HardwareProfile:

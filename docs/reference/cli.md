@@ -38,6 +38,7 @@ python scripts/generate.py \
 | `--temperature FLOAT` | `generation.temperature`, otherwise `0.0` | Generation sampling temperature. |
 | `--run-name NAME` | `gen_YYYYMMDD_HHMMSS` | Output run name, using local time when generated automatically. |
 | `--config PATH` | `configs/eval_default.yaml` | Load generation and hardware settings from an evaluation YAML file. |
+| `--operator-mode MODE` | `operator_mode` from configuration, otherwise `aclnn` | `aclnn` (process-local shared library) or `jit` (reserved, not implemented). |
 
 `max_tokens` is configured through `generation.max_tokens`; there is no `--max-tokens` flag. Successful samples include `prompt.txt`, `custom_op.asc`, `model_new.py`, and, when nonempty, `response_raw.txt`.
 
@@ -61,6 +62,7 @@ python scripts/evaluate.py \
 | `--device DEVICE` | `npu:0` | NPU device for each worker. |
 | `--no-perf` | Disabled | Skip performance timing; compilation and correctness checks still run. |
 | `--config PATH` | `configs/eval_default.yaml` | Evaluation protocol settings. |
+| `--operator-mode MODE` | `operator_mode` from configuration, otherwise `aclnn` | `aclnn` (process-local shared library) or `jit` (reserved, not implemented). |
 
 This command has no `--task`, `--level`, `--sample-id`, or generation options. It discovers sample directories under `runs/<name>/level*/*/sample_*` that contain both `custom_op.asc` and `model_new.py`.
 
@@ -91,6 +93,7 @@ python scripts/run_single.py \
 | `--temperature FLOAT` | Generation configuration | Override sampling temperature. |
 | `--no-perf` | Disabled | Skip timing while retaining NPU correctness checks. |
 | `--config PATH` | `configs/eval_default.yaml` | Generation and evaluation settings. |
+| `--operator-mode MODE` | `operator_mode` from configuration, otherwise `aclnn` | `aclnn` (process-local shared library) or `jit` (reserved, not implemented). |
 
 Generation fallbacks match `generate.py`: model `deepseek-v4-flash`, prompt mode `one_shot`, temperature `0.0`, and maximum tokens `16384`. This script always generates one sample; it does not use `generation.num_samples`.
 

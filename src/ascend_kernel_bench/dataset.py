@@ -18,6 +18,10 @@ from pathlib import Path
 
 from ._paths import KB_ROOT
 
+# Vendored KernelBench corpus committed under KernelBench/.
+KERNELBENCH_TASK_COUNT = 270
+KERNELBENCH_LEVEL_COUNTS = {1: 100, 2: 100, 3: 50, 4: 20}
+
 TASK_ID_RE = re.compile(r"^level(?P<level>\d+)/(?P<stem>[^/]+)$")
 STEM_NUM_RE = re.compile(r"^(?P<num>\d+)_")
 

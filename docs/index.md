@@ -43,7 +43,7 @@ features:
 The input is a PyTorch reference `Model`. A language model produces two files:
 `custom_op.asc`, containing the Ascend C kernel and binding, and `model_new.py`,
 containing a compatible `ModelNew` wrapper. The evaluator checks that wrapper,
-builds the extension, compares outputs, and measures eligible candidates against
+builds a process-local `libcustom_op.so`, loads it in the PyTorch process, compares outputs, and measures eligible candidates against
 `torch_npu` eager execution. [Results and metrics](/guide/results) explains how
 `fast_p` and `pass@k` are calculated and which samples enter each denominator.
 

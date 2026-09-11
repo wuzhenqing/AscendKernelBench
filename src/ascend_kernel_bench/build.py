@@ -1,9 +1,11 @@
-"""Build LLM-generated Ascend C sources with the fixed CMake project.
+"""Build LLM-generated Ascend C sources as a process-local shared library.
 
-The build contract (docs/task_authoring.md): the LLM writes a single self-contained
-``custom_op.asc``; this module copies ``build_template/CMakeLists.txt`` into
-the sample work directory, injects ``CMAKE_ASC_ARCHITECTURES`` from the
-hardware profile, and produces an importable ``custom_op`` Python extension.
+ACLNN mode (the only implemented mode) copies ``build_template/CMakeLists.txt``
+into the sample work directory, injects ``CMAKE_ASC_ARCHITECTURES``, and
+produces ``libcustom_op.so`` in that directory. The evaluator then loads the
+library in the PyTorch process. Nothing is installed globally.
+
+JIT mode is reserved and rejected here until it is merged.
 """
 
 from __future__ import annotations
@@ -16,6 +18,12 @@ from functools import lru_cache
 from pathlib import Path
 
 from ._paths import BUILD_TEMPLATE_DIR
+from .modes import (
+    ACLNN_MODE,
+    ACLNN_SHARED_LIBRARY_NAME,
+    OperatorModeError,
+    require_implemented_mode,
+)
 
 DEFAULT_CANN_SET_ENV = "/usr/local/Ascend/cann-9.1.0/set_env.sh"
 
@@ -57,12 +65,18 @@ def build_custom_op(
     *,
     cmake_arch: str,
     timeout_s: int = 600,
+    operator_mode: str = ACLNN_MODE,
 ) -> Path:
-    """Write ``custom_op.asc`` into ``work_dir`` and build ``custom_op``.
+    """Write ``custom_op.asc`` into ``work_dir`` and build ``libcustom_op.so``.
 
-    Returns the path to the built extension module. Raises BuildError with
-    the compiler log on failure.
+    Returns the path to the built shared library. Raises BuildError with
+    the compiler log on failure. Never runs ``cmake --install``.
     """
+    try:
+        require_implemented_mode(operator_mode)
+    except OperatorModeError as exc:
+        raise BuildError(str(exc)) from exc
+
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     (work_dir / "custom_op.asc").write_text(asc_source, encoding="utf-8")
@@ -81,19 +95,44 @@ def build_custom_op(
         str(build_dir),
         f"-DCMAKE_ASC_ARCHITECTURES={cmake_arch}",
         f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={work_dir}",
-        # Torch/torch_npu/pybind11 are located via Python introspection, so the
+        # Torch and torch_npu are located via Python introspection, so the
         # interpreter must be the one from the active environment.
         f"-DPython3_EXECUTABLE={sys.executable}",
     ]
+    if os.environ.get("AKB_ENABLE_CCACHE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        configure_cmd.append("-DENABLE_CCACHE=ON")
     build_cmd = ["cmake", "--build", str(build_dir), "-j"]
 
     _run_checked("configure", configure_cmd, cwd=work_dir, env=env, timeout_s=timeout_s)
     _run_checked("build", build_cmd, cwd=work_dir, env=env, timeout_s=timeout_s)
 
-    candidates = sorted(work_dir.glob("custom_op*.so"))
-    if not candidates:
-        raise BuildError(f"Built module not found in {work_dir}")
-    return candidates[0]
+    return find_built_library(work_dir)
+
+
+def find_built_library(work_dir: Path) -> Path:
+    """Locate the process-local shared library written by the ACLNN CMake project.
+
+    Prefers ``libcustom_op.so``. Also accepts a Python-extension-style
+    ``custom_op*.so`` so older artifacts remain loadable.
+    """
+    work_dir = Path(work_dir)
+    preferred = work_dir / ACLNN_SHARED_LIBRARY_NAME
+    if preferred.is_file():
+        return preferred
+    candidates = sorted(
+        p
+        for p in work_dir.glob("custom_op*.so")
+        if p.is_file() and p.name != ACLNN_SHARED_LIBRARY_NAME
+    )
+    if candidates:
+        return candidates[0]
+    nested = work_dir / "build" / ACLNN_SHARED_LIBRARY_NAME
+    if nested.is_file():
+        return nested
+    raise BuildError(
+        f"Built shared library not found in {work_dir} "
+        f"(expected {ACLNN_SHARED_LIBRARY_NAME})"
+    )
 
 
 def _run_checked(
@@ -104,6 +143,8 @@ def _run_checked(
     env: dict[str, str],
     timeout_s: int,
 ) -> None:
+    if cmd[:2] == ["cmake", "--install"]:
+        raise BuildError("cmake --install is forbidden; operators stay process-local")
     try:
         result = subprocess.run(
             cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout_s

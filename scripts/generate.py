@@ -24,6 +24,7 @@ from ascend_kernel_bench import rundir
 from ascend_kernel_bench.config import load_eval_config, load_hardware_profile
 from ascend_kernel_bench.dataset import discover_tasks, load_task
 from ascend_kernel_bench.llm import LLMClient
+from ascend_kernel_bench.modes import OPERATOR_MODES, OperatorModeError, require_implemented_mode
 from ascend_kernel_bench.prompt import SYSTEM_PROMPT, build_prompt
 
 console = Console()
@@ -42,6 +43,12 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--config", default=None)
+    parser.add_argument(
+        "--operator-mode",
+        default=None,
+        choices=list(OPERATOR_MODES),
+        help="aclnn (process-local shared library) or jit (not implemented yet)",
+    )
     args = parser.parse_args()
 
     config = load_eval_config(args.config)
@@ -54,6 +61,12 @@ def main() -> None:
     if temperature is None:
         temperature = float(gen_cfg.get("temperature", 0.0))
     max_tokens = int(gen_cfg.get("max_tokens", 16384))
+    try:
+        operator_mode = require_implemented_mode(
+            args.operator_mode or config.operator_mode
+        )
+    except OperatorModeError as exc:
+        sys.exit(str(exc))
 
     if args.task:
         tasks = [load_task(t) for t in args.task]
@@ -72,6 +85,7 @@ def main() -> None:
         "prompt_mode": prompt_mode,
         "num_samples": n_samples,
         "hardware": hardware.name,
+        "operator_mode": operator_mode,
         "tasks": [t.task_id for t in tasks],
     })
     console.print(f"run dir: {run_dir}  ({len(tasks)} tasks x {n_samples} samples)")
@@ -89,7 +103,9 @@ def main() -> None:
     ) as progress:
         bar = progress.add_task("generating", total=total)
         for task in tasks:
-            prompt = build_prompt(task, hardware, mode=prompt_mode)
+            prompt = build_prompt(
+                task, hardware, mode=prompt_mode, operator_mode=operator_mode
+            )
             for sample_id in range(n_samples):
                 progress.update(bar, description=f"{task.task_id} s{sample_id}")
                 try:

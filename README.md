@@ -20,8 +20,10 @@ against `torch_npu` eager execution.
   operators, 100 fused operators, 50 networks or subgraphs, and 20 model tasks.
 - **Generation through an OpenAI-compatible endpoint**, with saved source files
   that can be evaluated later or transferred to another machine.
-- **A shared CMake and pybind11 build path** for `custom_op.asc` and a
-  `ModelNew` wrapper in `model_new.py`.
+- **An ACLNN operator-project build path** that compiles `custom_op.asc` into
+  a process-local `libcustom_op.so` and loads it inside the evaluating PyTorch
+  process (never installed into site-packages or the global CANN OPP path).
+  A KernelBench-style JIT mode is reserved and not implemented yet.
 - **Isolated evaluation workers** with static checks, seeded correctness trials,
   input mutation checks, NPU event timing, and post-timing correctness checks.
 - **Machine-readable results**, `fast_p` metrics, and `pass@k` estimates.
@@ -141,7 +143,7 @@ KernelBench/                 Vendored reference tasks, level1 through level4
 src/ascend_kernel_bench/      Generation, build, evaluation, and scoring modules
 scripts/                     Five benchmark CLIs and documentation link checker
 configs/                     Evaluation defaults and hardware profiles
-build_template/              Shared Ascend C CMake project
+build_template/              ACLNN CMake project that writes libcustom_op.so
 docs/                        English user documentation and VitePress configuration
 .github/workflows/docs.yml   Documentation checks and Pages deployment
 runs/                        Local generated candidates and results (ignored by Git)

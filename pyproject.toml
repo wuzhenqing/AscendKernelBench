@@ -22,6 +22,10 @@ dev = ["pytest", "ruff"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
 [tool.setuptools.package-data]
 # Examples live one level down (prompts/examples/<name>/<files>); the second
 # glob is what actually ships their contents.

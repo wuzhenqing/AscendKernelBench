@@ -73,16 +73,16 @@ Each generated sample contains the two implementation files used by the build/ev
 
 | File | Required content |
 | --- | --- |
-| `custom_op.asc` | A self-contained Ascend C implementation, its host launch wrapper, and `PYBIND11_MODULE(custom_op, m)`. |
-| `model_new.py` | A `ModelNew` class with constructor and forward signatures matching `Model`, importing and calling `custom_op`. |
+| `custom_op.asc` | A self-contained Ascend C implementation, its host launch wrapper, and a process-local `TORCH_LIBRARY(custom_op, ...)` / `TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, ...)` binding. |
+| `model_new.py` | A `ModelNew` class with constructor and forward signatures matching `Model`, calling `torch.ops.custom_op`. |
 
-The `.asc` source must contain the `__global__`, `__vector__`, and `PYBIND11_MODULE` markers. Follow the bundled [elementwise-add example](https://github.com/wuzhenqing/AscendKernelBench/tree/main/src/ascend_kernel_bench/prompts/examples/001_elementwise_add) for the kernel class, current NPU stream, host launch, and binding structure. The extension name is fixed to `custom_op`; exported entry point names are free, with `run` used by convention. The build system supplies the CMake project and target architecture.
+The `.asc` source must contain `__global__`, `__vector__`, `TORCH_LIBRARY`, and `TORCH_LIBRARY_IMPL`. Follow the bundled [elementwise-add example](https://github.com/wuzhenqing/AscendKernelBench/tree/main/src/ascend_kernel_bench/prompts/examples/001_elementwise_add) for the kernel class, current NPU stream, host launch, and binding structure. The namespace is fixed to `custom_op`; exported entry point names are free, with `run` used by convention. The build system supplies the CMake project and target architecture and writes `libcustom_op.so` into the sample directory. Do not emit pybind11 code or an OPP / `custom_opp` install project; the evaluator loads that `.so` with `torch.ops.load_library`.
 
 The wrapper should remain small:
 
 ```python
+import torch
 import torch.nn as nn
-import custom_op
 
 
 class ModelNew(nn.Module):
@@ -90,7 +90,7 @@ class ModelNew(nn.Module):
         super().__init__()
 
     def forward(self, a, b):
-        return custom_op.run(a, b)
+        return torch.ops.custom_op.run(a, b)
 ```
 
 For parameterized tasks, `ModelNew.__init__` may construct layers such as `nn.Linear` as parameter containers. Pass their weights and biases to the custom operator. Calling those layers to perform the computation is prohibited.

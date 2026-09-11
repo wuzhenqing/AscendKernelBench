@@ -16,11 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from rich.console import Console
 from rich.panel import Panel
 
+from dataclasses import replace
+
 from ascend_kernel_bench import rundir
 from ascend_kernel_bench.config import load_eval_config, load_hardware_profile
 from ascend_kernel_bench.dataset import load_task
 from ascend_kernel_bench.eval import eval_sample
 from ascend_kernel_bench.llm import LLMClient
+from ascend_kernel_bench.modes import OPERATOR_MODES, OperatorModeError, require_implemented_mode
 from ascend_kernel_bench.prompt import SYSTEM_PROMPT, build_prompt
 
 console = Console()
@@ -39,6 +42,12 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--no-perf", action="store_true", help="skip timing")
     parser.add_argument("--config", default=None, help="eval config yaml")
+    parser.add_argument(
+        "--operator-mode",
+        default=None,
+        choices=list(OPERATOR_MODES),
+        help="aclnn (process-local shared library) or jit (not implemented yet)",
+    )
     args = parser.parse_args()
 
     config = load_eval_config(args.config)
@@ -50,6 +59,14 @@ def main() -> None:
     if temperature is None:
         temperature = float(gen_cfg.get("temperature", 0.0))
     max_tokens = int(gen_cfg.get("max_tokens", 16384))
+    try:
+        if args.operator_mode:
+            config = replace(
+                config, operator_mode=require_implemented_mode(args.operator_mode)
+            )
+        operator_mode = require_implemented_mode(config.operator_mode)
+    except OperatorModeError as exc:
+        sys.exit(str(exc))
 
     task = load_task(args.task)
     run_name = args.run_name or f"single_{task.name}"
@@ -60,11 +77,14 @@ def main() -> None:
         "prompt_mode": prompt_mode,
         "hardware": hardware.name,
         "device": args.device,
+        "operator_mode": operator_mode,
         "tasks": [task.task_id],
     })
 
     console.rule(f"[bold]{task.task_id}[/bold] on {hardware.name}")
-    prompt = build_prompt(task, hardware, mode=prompt_mode)
+    prompt = build_prompt(
+        task, hardware, mode=prompt_mode, operator_mode=operator_mode
+    )
     console.print(f"prompt: {len(prompt)} chars, mode={prompt_mode}, model={model}")
 
     client = LLMClient(model, temperature=temperature, max_tokens=max_tokens)

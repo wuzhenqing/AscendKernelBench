@@ -38,6 +38,7 @@ Use `--config path/to/eval.yaml` for a different configuration. The default valu
 | `excessive_speedup` | `10.0` | Speedups strictly above this value are flagged for review. |
 | `build_timeout` | `600` seconds | Separate budget for CMake configure and CMake build. |
 | `eval_timeout` | `300` seconds | Additional time included in the overall worker budget. |
+| `operator_mode` | `aclnn` | Process-local shared library. `jit` is reserved and not implemented. |
 
 The batch evaluator visits every complete sample directory sequentially and re-evaluates existing samples; it has no resume/skip flag. Re-evaluation overwrites each `eval_result.json` and rebuilds aggregate files. Preserve a copy of a run before measuring it on another device or with different settings.
 
@@ -45,11 +46,11 @@ The batch evaluator visits every complete sample directory sequentially and re-e
 
 For each sample, the host checks that `custom_op.asc` and `model_new.py` exist and applies the [candidate static checks](/task_authoring#candidate-rules-and-checks). A static violation produces a failed result without launching the worker.
 
-An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. The worker builds the operator using the fixed `build_template/CMakeLists.txt`, loads the task and `ModelNew`, and runs correctness and timing. Results travel through a temporary JSON file rather than standard output.
+An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. In `aclnn` mode the worker builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. `jit` mode is reserved and not implemented. Results travel through a temporary JSON file rather than standard output.
 
 The host allows `eval_timeout + 2 * build_timeout` seconds for the whole worker: 1,500 seconds with the defaults. There is no separate 300-second timer started after compilation. On an overall timeout, the host attempts to kill the worker's entire process group and records a failure.
 
-The build writes `custom_op.asc`, copies the fixed CMake template into the sample directory, and passes the profile's `cmake_arch` as `CMAKE_ASC_ARCHITECTURES`. CMake locates PyTorch, `torch_npu`, and pybind11 through the active Python interpreter. Configure and build logs are stored under `sample_*/build/`.
+The build writes `custom_op.asc`, copies the fixed CMake template into the sample directory, and passes the profile's `cmake_arch` as `CMAKE_ASC_ARCHITECTURES`. The template is an `add_library(... SHARED)` project that writes `libcustom_op.so` next to the source, bakes RPATH, and sets `CMAKE_SKIP_INSTALL_RULES`. CMake locates PyTorch and `torch_npu` through the active Python interpreter. Configure and build logs are stored under `sample_*/build/`. Set `AKB_ENABLE_CCACHE=1` to pass `-DENABLE_CCACHE=ON` when `ccache` is available.
 
 The build environment helper sources `CANN_SET_ENV`, defaulting to `/usr/local/Ascend/cann-9.1.0/set_env.sh`, if that file exists; otherwise it uses the current environment. Prepare the runtime environment before launching evaluation, because the worker imports `torch_npu` before the build helper runs.
 

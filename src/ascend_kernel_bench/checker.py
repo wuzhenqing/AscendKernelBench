@@ -10,11 +10,13 @@ Two entry points:
   variations. ``nn`` layers MAY be constructed as parameter containers (the
   evaluator seeds candidate and reference construction identically, so
   identical construction reproduces the reference weights) but must never be
-  called — compute belongs to the custom op.
+  called — compute belongs to the custom op. The wrapper must call
+  ``torch.ops.custom_op``, not ``import custom_op``.
 - :func:`check_custom_op_asc` inspects the Ascend C source: it must contain a
-  real ``__global__ __vector__`` kernel and the pybind module, and must not
-  call ATen compute ops, vendor prebuilt ops (aclnn/aclop), or host side
-  effects (process execution, networking, dynamic loading, threads).
+  real ``__global__ __vector__`` kernel and a ``TORCH_LIBRARY`` /
+  ``TORCH_LIBRARY_IMPL`` binding (not pybind11), and must not call ATen
+  compute ops, vendor prebuilt ops (aclnn/aclop), or host side effects
+  (process execution, networking, dynamic loading, threads).
 
 Both return lists of human-readable violations; empty means pass. Static
 checks are advisory: they close accidental and low-effort bypasses, not
@@ -298,8 +300,8 @@ class _WrapperSemantics(ast.NodeVisitor):
         self.visit(tree)
         if not self.calls_custom_op:
             self.violations.append(
-                "never calls the compiled custom_op module — the wrapper must "
-                "call the Ascend C operator"
+                "never calls torch.ops.custom_op — the wrapper must call the "
+                "evaluator-loaded Ascend C operator"
             )
 
     # -- name resolution ---------------------------------------------------
@@ -319,7 +321,7 @@ class _WrapperSemantics(ast.NodeVisitor):
         return self._resolve(node) if isinstance(node, ast.Attribute) else None
 
     def _is_custom_op_path(self, path: str) -> bool:
-        if path == "custom_op" or path.startswith("custom_op."):
+        if path == "torch.ops.custom_op" or path.startswith("torch.ops.custom_op."):
             return True
         return any(path == ref or path.startswith(ref + ".") for ref in self.co_refs)
 
@@ -330,6 +332,12 @@ class _WrapperSemantics(ast.NodeVisitor):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     root = alias.name.split(".")[0]
+                    if root == "custom_op":
+                        self._flag(
+                            "import custom_op is not used; call "
+                            "torch.ops.custom_op after the evaluator loads "
+                            "libcustom_op.so"
+                        )
                     if root in _BANNED_IMPORT_ROOTS:
                         self._flag(f"banned import: {alias.name}")
                     # `import a.b` binds `a`; `import a.b as c` binds c -> a.b
@@ -338,6 +346,12 @@ class _WrapperSemantics(ast.NodeVisitor):
                     )
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ""
+                if module.split(".")[0] == "custom_op":
+                    self._flag(
+                        "from custom_op import ... is not used; call "
+                        "torch.ops.custom_op after the evaluator loads "
+                        "libcustom_op.so"
+                    )
                 if module.split(".")[0] in _BANNED_IMPORT_ROOTS:
                     self._flag(f"banned import: from {module}")
                 for alias in node.names:
@@ -510,6 +524,14 @@ class _WrapperSemantics(ast.NodeVisitor):
             if func_path.startswith("torch_npu."):
                 self._flag(f"vendor native op shortcut: {func_path}()")
                 flagged = True
+            elif func_path == "torch.ops.load_library" or (
+                func_path.endswith(".load_library") and "torch.ops" in func_path
+            ):
+                self._flag(
+                    "torch.ops.load_library is reserved for the evaluator; "
+                    "ModelNew must only call the already-loaded custom_op"
+                )
+                flagged = True
             elif func_path.startswith("torch.ops."):
                 self._flag(f"vendor op-plugin call: {func_path}()")
                 flagged = True
@@ -629,7 +651,7 @@ def check_model_new(source: str) -> list[str]:
 # Ascend C source checks (custom_op.asc)
 # ---------------------------------------------------------------------------
 
-_ASC_REQUIRED_MARKERS = ("__global__", "__vector__", "PYBIND11_MODULE")
+_ASC_KERNEL_MARKERS = ("__global__", "__vector__")
 
 # at:: host-side calls that are pure allocation/construction, never compute.
 _ASC_AT_ALLOWED_CALLS = {
@@ -672,18 +694,38 @@ def check_custom_op_asc(source: str) -> list[str]:
     """Return static-check violations for generated ``custom_op.asc`` source.
 
     The host wrapper may allocate outputs and launch kernels; all compute must
-    be inside the ``__global__ __vector__`` Ascend C kernel. ATen compute
-    calls, vendor prebuilt ops (aclnn/aclop) and host side effects are banned.
+    be inside the ``__global__ __vector__`` Ascend C kernel. Bind the operator
+    with ``TORCH_LIBRARY(custom_op, ...)`` and
+    ``TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, ...)`` so the evaluator can
+    ``torch.ops.load_library`` ``libcustom_op.so``. ATen compute calls, vendor
+    prebuilt ops (aclnn/aclop), pybind11, and host side effects are banned.
     """
     code = _strip_cpp_comments(source)
     violations: list[str] = []
 
-    for marker in _ASC_REQUIRED_MARKERS:
+    for marker in _ASC_KERNEL_MARKERS:
         if marker not in code:
             violations.append(
                 f"custom_op.asc missing {marker!r}: not an Ascend C kernel "
                 "(host-only ATen implementations are not allowed)"
             )
+    if not re.search(r"\bTORCH_LIBRARY\s*\(", code):
+        violations.append(
+            "custom_op.asc missing TORCH_LIBRARY(...): register the operator "
+            "schema so the evaluator can torch.ops.load_library the "
+            "process-local .so"
+        )
+    if not re.search(r"\bTORCH_LIBRARY_IMPL\s*\(", code):
+        violations.append(
+            "custom_op.asc missing TORCH_LIBRARY_IMPL(...): bind the NPU "
+            "implementation (PrivateUse1) for torch.ops.custom_op"
+        )
+    if "PYBIND11_MODULE" in code or "#include <pybind11/" in code:
+        violations.append(
+            "pybind11 is not used; register with TORCH_LIBRARY / "
+            "TORCH_LIBRARY_IMPL and let the evaluator call "
+            "torch.ops.load_library"
+        )
 
     bad_aten = sorted(
         {

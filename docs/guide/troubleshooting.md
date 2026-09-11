@@ -37,9 +37,9 @@ python -m pip install -e .
 
 The scripts add `src/` to their own import path, but an evaluation worker starts a new interpreter with `python -m ascend_kernel_bench.worker`. It therefore needs an installed package or an explicitly configured `PYTHONPATH`; the parent script's temporary `sys.path` change is not enough.
 
-### Missing `torch`, `torch_npu`, or `pybind11`
+### Missing `torch` or `torch_npu`
 
-The base package dependencies support generation and analysis. They do not install the Ascend runtime stack. On the Linux evaluation host, use the same Python environment for the benchmark, its compatible PyTorch / `torch_npu` installation, and `pybind11`. The CMake build receives the running interpreter as `Python3_EXECUTABLE` and discovers those packages through it.
+The base package dependencies support generation and analysis. They do not install the Ascend runtime stack. On the Linux evaluation host, use the same Python environment for the benchmark and its compatible PyTorch / `torch_npu` installation. The CMake build receives the running interpreter as `Python3_EXECUTABLE` and discovers those packages through it.
 
 Do not try to resolve a missing `torch_npu` import on macOS by substituting a CPU evaluation path. Move the saved sources to the prepared Ascend host instead. Some tasks also import optional libraries; inspect the task's imports when a reference module cannot load.
 
@@ -66,7 +66,7 @@ See [Connect an LLM service](/deploy_llm_service) for the endpoint contract.
 | HTTP 404 or unknown model | The base URL is an API root rather than a full completion URL, and `--model` matches a served identifier. |
 | Unsupported parameter or response format | The endpoint accepts Chat Completions with `temperature` and `max_tokens`. Structured-output failure triggers a plain-request fallback. |
 | `no fenced code blocks found` | The plain fallback response must contain fenced source blocks; plain JSON is not parsed by that fallback. |
-| Missing `__vector__`, `PYBIND11_MODULE`, or `class ModelNew` | The model returned incomplete or incorrectly formatted file contents. Inspect the response where available and the console error. |
+| Missing `__vector__`, `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL`, `class ModelNew`, or `torch.ops.custom_op` | The model returned incomplete or incorrectly formatted file contents. Inspect the response where available and the console error. |
 | Truncated source | Review the service's output limit and `generation.max_tokens` in the selected YAML configuration. |
 
 `generation failed validation` can wrap service or transport errors as well as content errors. Read the nested message. `response_raw.txt` is saved only after generation succeeds, so a failed attempt may have no raw response artifact.
@@ -79,11 +79,11 @@ Batch generation exits successfully if at least one requested sample was saved. 
 
 Run names are reusable, but the scripts do not provide automatic resume or experiment isolation. Regeneration overwrites matching sample files and the run configuration. Old results or extra sample directories can remain. Use a fresh run name for each experiment and preserve the original run when testing changes.
 
-When moving between machines or incompatible Python environments, carry the candidate sources and generation metadata, and rebuild in a fresh sample directory on the target host. Existing `build/` contents and `custom_op*.so` files belong to the environment that produced them.
+When moving between machines or incompatible Python environments, carry the candidate sources and generation metadata, and rebuild in a fresh sample directory on the target host. Existing `build/` contents and `libcustom_op.so` / `custom_op*.so` files belong to the environment that produced them. Do not install those libraries into site-packages or the CANN OPP vendors path; the evaluator loads the sample-local `.so` with `torch.ops.load_library`.
 
 ## Static-check rejection
 
-`metadata.static_check_error` lists the violations, and the compiler is not invoked. The checker requires a real Ascend C kernel and a Python wrapper that calls `custom_op`. It rejects, among other things:
+`metadata.static_check_error` lists the violations, and the compiler is not invoked. The checker requires a real Ascend C kernel and a Python wrapper that calls `torch.ops.custom_op`. It rejects, among other things:
 
 - PyTorch, tensor-method, or vendor prebuilt operator computation used in place of the custom kernel.
 - CPU / NumPy fallback, exception-based fallback, and empty `pass` implementations.
@@ -105,13 +105,13 @@ export CANN_SET_ENV='/absolute/path/to/cann/set_env.sh'
 
 If that file does not exist, the helper silently uses the current environment. Confirm the path or start from a correctly initialized CANN shell. The helper caches the sourced environment per Python process, so restart after changing toolchain settings. Its environment setup applies to build subprocesses; the evaluation Python process must already be able to import and use the Ascend runtime.
 
-The fixed build requires CMake, the ASC toolchain, a suitable GCC toolchain, Python development files, PyTorch, `torch_npu`, and `pybind11`. `Failed to locate libgcc.a` or `Failed to derive GCC toolchain root` points to compiler discovery; a missing header or library is usually clearer in `build/configure.log` or `build/build.log` than in the truncated result message.
+The ACLNN CMake project requires CMake, the ASC toolchain, a suitable GCC toolchain, Python development files, PyTorch, and `torch_npu`. `Failed to locate libgcc.a` or `Failed to derive GCC toolchain root` points to compiler discovery; a missing header or library is usually clearer in `build/configure.log` or `build/build.log` than in the truncated result message. A request for `operator_mode=jit` fails before compilation: that mode is not implemented yet.
 
 ### `configure failed`, `build failed`, or no built module
 
-Read the matching build log and confirm that the selected hardware profile matches the device and compiler. The profile supplies `CMAKE_ASC_ARCHITECTURES`. The generated file must use the APIs expected by the project's build template and export `PYBIND11_MODULE(custom_op, m)`.
+Read the matching build log and confirm that the selected hardware profile matches the device and compiler. The profile supplies `CMAKE_ASC_ARCHITECTURES`. The generated file must use the APIs expected by the project's build template and export `TORCH_LIBRARY(custom_op, ...)` plus `TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, ...)`.
 
-`Built module not found` means the build command returned successfully but no `custom_op*.so` was found in the sample directory. Check the output location and preserve the build log for investigation.
+`Built shared library not found` means the build command returned successfully but `libcustom_op.so` was not found in the sample directory. Check the output location and preserve the build log for investigation.
 
 ### `module load failed` or `candidate model init failed`
 

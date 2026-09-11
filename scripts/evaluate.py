@@ -21,10 +21,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from dataclasses import replace
+
 from ascend_kernel_bench import rundir
 from ascend_kernel_bench.config import load_eval_config, load_hardware_profile
 from ascend_kernel_bench.dataset import load_task
 from ascend_kernel_bench.eval import eval_sample
+from ascend_kernel_bench.modes import OPERATOR_MODES, OperatorModeError, require_implemented_mode
 from ascend_kernel_bench.score import compute_pass_at_k
 
 console = Console()
@@ -37,9 +40,24 @@ def main() -> None:
     parser.add_argument("--device", default="npu:0")
     parser.add_argument("--no-perf", action="store_true")
     parser.add_argument("--config", default=None)
+    parser.add_argument(
+        "--operator-mode",
+        default=None,
+        choices=list(OPERATOR_MODES),
+        help="aclnn (process-local shared library) or jit (not implemented yet)",
+    )
     args = parser.parse_args()
 
     config = load_eval_config(args.config)
+    try:
+        if args.operator_mode:
+            config = replace(
+                config, operator_mode=require_implemented_mode(args.operator_mode)
+            )
+        else:
+            require_implemented_mode(config.operator_mode)
+    except OperatorModeError as exc:
+        sys.exit(str(exc))
     hardware = load_hardware_profile(args.hardware or config.hardware)
     run_dir = rundir.RUNS_DIR / args.run_name
     if not run_dir.is_dir():

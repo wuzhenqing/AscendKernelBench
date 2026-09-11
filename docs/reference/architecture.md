@@ -17,7 +17,7 @@ KernelBench task + hardware profile
                   |
           one worker per sample
                   |
-        fixed CMake build -> custom_op.so
+        ACLNN CMake project -> libcustom_op.so (process-local load)
                   |
         correctness -> NPU-event timing
                   |
@@ -39,7 +39,9 @@ KernelBench task + hardware profile
 | `checker.py` | Heuristic Python AST/pattern checks and Ascend C source checks. |
 | `eval.py` | Host orchestration plus worker-side build, correctness, and timing logic. |
 | `worker.py` | JSON-config subprocess entry point and result-file output. |
-| `build.py` and `build_template/` | CANN environment capture and fixed CMake extension compilation. |
+| `modes.py` | Operator-mode names: `aclnn` (implemented) and `jit` (reserved). |
+| `build.py` and `build_template/` | CANN environment capture and the ACLNN CMake project that writes `libcustom_op.so`. |
+| `loader.py` | `torch.ops.load_library` of that sample-local shared library (never a global install). |
 | `timing.py` | NPU events, L2 thrashing, and timing statistics. |
 | `score.py` | Sample speedups, `fast_p`, geometric mean speedup, and pass@k. |
 
@@ -69,7 +71,7 @@ Prompt examples live inside the package and are included as package data. The ve
 
 ## Generation boundary
 
-Prompt construction reads task source without executing it. Prompts contain the complete reference file, target hardware information, the selected examples, and a fixed two-file output contract. `zero_shot` omits examples, `one_shot` uses the first example, and `few_shot` uses every available example. The current repository ships one example, so the two example-bearing modes currently use the same example set.
+Prompt construction reads task source without executing it. Prompts contain the complete reference file, target hardware information, the selected examples, and a fixed two-file output contract. `zero_shot` omits examples, `one_shot` uses the first example, and `few_shot` uses every available example. The current repository ships two examples (elementwise add, then LeakyReLU). `one_shot` uses the first; `few_shot` uses both.
 
 The LLM client first attempts a structured response with the `custom_op_asc` and `model_new_py` fields. If that request or parsing fails, it attempts a normal completion and extracts two fenced code blocks. The resulting fields pass through the same Pydantic model and marker checks. Generation can retry once after an invalid/failed attempt. Endpoint fallback and retries can therefore issue more than one request for a sample.
 
@@ -81,7 +83,9 @@ The host reads sample source and runs static checks before launching `python -m 
 
 NPU imports live inside worker/timing functions so source inspection and host-side utilities do not initialize an NPU runtime. The worker loads generated code, compiles native code, and uses the selected NPU. Its process is separate but has the invoking user's privileges; this is not a security sandbox.
 
-Build configuration is controlled by the repository template. The generated `.asc` file supplies kernel logic, host launch wrappers, and the `custom_op` binding. The template supplies C++17, dependency discovery, compiler/toolchain options, and linkage. Hardware profile architecture selection is an input to compilation, not runtime hardware verification.
+Build configuration is controlled by the repository template. The generated `.asc` file supplies kernel logic, host launch wrappers, and a `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL` binding. The template builds a **process-local** `libcustom_op.so` with RPATH to Torch, `torch_npu`, and CANN libraries. It does not run `cmake --install`, does not produce a `custom_opp_*.run` package, and does not write into site-packages or `$ASCEND_OPP_PATH/vendors`. The worker loads that `.so` with `torch.ops.load_library` so `torch.ops.custom_op` is available. Hardware profile architecture selection is an input to compilation, not runtime hardware verification.
+
+Two operator modes are defined. `aclnn` is the path above. `jit` is reserved for a future KernelBench-style in-process compile and is rejected until it is merged.
 
 The [evaluation guide](/guide/evaluation) documents seeded initialization, tolerance rules, CPU-reference fallback, timeout accounting, and event timing. The [task authoring guide](/task_authoring) describes both reference and candidate contracts.
 

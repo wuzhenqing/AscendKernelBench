@@ -42,15 +42,17 @@ class AscendCGeneration(BaseModel):
         description=(
             "Complete self-contained Ascend C source file custom_op.asc: "
             "kernel class, __global__ __vector__ kernel, host launch wrapper "
-            "taking at::Tensor, and PYBIND11_MODULE(custom_op, m) binding. "
-            "Raw file content only, no markdown fences."
+            "taking at::Tensor, and a process-local torch.library binding "
+            "(TORCH_LIBRARY(custom_op, ...) and "
+            "TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, ...)). "
+            "Raw file content only, no markdown fences. Do not use pybind11."
         )
     )
     model_new_py: str = Field(
         description=(
             "Python source of model_new.py defining class ModelNew with the "
             "same __init__ and forward signatures as the reference Model, "
-            "internally importing custom_op and calling the compiled operator. "
+            "calling the evaluator-loaded operator via torch.ops.custom_op. "
             "Raw file content only, no markdown fences."
         )
     )
@@ -78,16 +80,22 @@ STRUCTURED_OUTPUT_NOTE = (
     "and without markdown fences."
 )
 
-_MIN_ASC_MARKERS = ("PYBIND11_MODULE", "__global__", "__vector__")
-_MIN_PY_MARKERS = ("class ModelNew",)
+_MIN_ASC_KERNEL_MARKERS = ("__global__", "__vector__")
+_MIN_ASC_BINDING_MARKERS = ("TORCH_LIBRARY", "TORCH_LIBRARY_IMPL")
+_MIN_PY_MARKERS = ("class ModelNew", "torch.ops.custom_op")
 
 
 def validate_generation(gen: AscendCGeneration) -> list[str]:
     """Sanity-check that the fields carry real file content."""
     problems = []
-    for marker in _MIN_ASC_MARKERS:
+    for marker in _MIN_ASC_KERNEL_MARKERS:
         if marker not in gen.custom_op_asc:
             problems.append(f"custom_op_asc missing {marker!r}")
+    for marker in _MIN_ASC_BINDING_MARKERS:
+        if marker not in gen.custom_op_asc:
+            problems.append(f"custom_op_asc missing {marker!r}")
+    if "PYBIND11_MODULE" in gen.custom_op_asc:
+        problems.append("custom_op_asc must not use PYBIND11_MODULE")
     for marker in _MIN_PY_MARKERS:
         if marker not in gen.model_new_py:
             problems.append(f"model_new_py missing {marker!r}")

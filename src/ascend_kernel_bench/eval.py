@@ -22,6 +22,7 @@ from pathlib import Path
 from .checker import check_custom_op_asc, check_model_new
 from .config import EvalConfig, HardwareProfile
 from .dataset import Task
+from .modes import ACLNN_MODE, require_implemented_mode
 
 __all__ = ["eval_sample", "eval_sample_on_device"]
 
@@ -96,6 +97,7 @@ def eval_sample(
             "tolerances": config.tolerances,
             "excessive_speedup": config.excessive_speedup,
             "build_timeout": config.build_timeout,
+            "operator_mode": require_implemented_mode(config.operator_mode),
             "result_path": str(result_path),
         }
         cfg_path = Path(tmpdir) / "cfg.json"
@@ -182,12 +184,14 @@ def eval_sample_on_device(
     tolerances: dict,
     excessive_speedup: float,
     build_timeout: int,
+    operator_mode: str = ACLNN_MODE,
 ) -> dict:
     """Build + correctness + timing in the current process (worker body)."""
     import torch
     import torch_npu  # noqa: F401  (registers the NPU backend)
 
     from .build import BuildError, build_custom_op
+    from .loader import LoadError, load_process_local_op
     from .timing import get_timing_stats, time_execution_with_npu_event
 
     sample_path = Path(sample_dir)
@@ -195,13 +199,26 @@ def eval_sample_on_device(
     model_new_src = (sample_path / "model_new.py").read_text(encoding="utf-8")
 
     try:
-        build_custom_op(
-            asc_source, sample_path, cmake_arch=cmake_arch, timeout_s=build_timeout
+        so_path = build_custom_op(
+            asc_source,
+            sample_path,
+            cmake_arch=cmake_arch,
+            timeout_s=build_timeout,
+            operator_mode=operator_mode,
         )
     except (BuildError, OSError) as exc:
         return _fail(compilation_error=str(exc))
 
-    # Load task contract and generated wrapper.
+    try:
+        load_process_local_op(so_path, asc_source)
+    except LoadError as exc:
+        return _fail(
+            compiled=True,
+            runtime_error=f"shared library load failed: {exc}",
+        )
+
+    # Load task contract and generated wrapper. libcustom_op.so is already
+    # registered via torch.ops.load_library — ModelNew calls torch.ops.custom_op.
     try:
         ref_globals: dict[str, object] = {}
         exec(compile(task_py, "<task.py>", "exec"), ref_globals)
@@ -211,17 +228,13 @@ def eval_sample_on_device(
         task_tolerance = ref_globals.get("TOLERANCE")
         custom_check = ref_globals.get("custom_check")
 
-        sys.path.insert(0, str(sample_path))
-        try:
-            custom_globals: dict[str, object] = {
-                "__file__": str(sample_path / "model_new.py")
-            }
-            exec(
-                compile(model_new_src, str(sample_path / "model_new.py"), "exec"),
-                custom_globals,
-            )
-        finally:
-            sys.path.remove(str(sample_path))
+        custom_globals: dict[str, object] = {
+            "__file__": str(sample_path / "model_new.py")
+        }
+        exec(
+            compile(model_new_src, str(sample_path / "model_new.py"), "exec"),
+            custom_globals,
+        )
         ModelNew = custom_globals["ModelNew"]
     except Exception as exc:
         return _fail(compiled=True, runtime_error=f"module load failed: {exc!r}")
@@ -439,6 +452,8 @@ def eval_sample_on_device(
         "correctness_passed": pass_count,
         "atol": atol,
         "rtol": rtol,
+        "operator_mode": operator_mode,
+        "shared_library": str(so_path),
     }
     if ref_npu_error:
         metadata["reference_npu_error"] = ref_npu_error

@@ -10,7 +10,7 @@ AscendKernelBench separates code generation from operator evaluation. You can in
 | Generate source through a remote endpoint | Yes | Yes |
 | Run the static source checker | Yes | Yes |
 | Analyze an existing `eval_results.json` | Yes | Yes |
-| Compile `custom_op.asc` | No, requires the Ascend toolchain | Yes, with the required toolchain |
+| Compile `custom_op.asc` into `libcustom_op.so` | No, requires the Ascend toolchain | Yes, with the required toolchain |
 | Check candidate correctness and measure performance | No | Yes |
 
 The evaluator has a CPU **reference** fallback for tasks that the NPU reference cannot execute. The candidate still runs on the NPU; this is not a CPU evaluation mode. Similarly, `--no-perf` skips timing but still builds and executes the candidate on an NPU.
@@ -96,7 +96,7 @@ The repository's fixed build template expects:
 
 - A Linux host with an accessible Ascend NPU and its driver/runtime.
 - A CANN environment providing the `ASC` CMake package/compiler. The template documents CANN 9.1.0 or newer as its requirement.
-- A compatible PyTorch and `torch_npu` installation, plus `pybind11`, importable in the active Python environment.
+- A compatible PyTorch and `torch_npu` installation, importable in the active Python environment.
 - CMake 3.16 or newer, Python development headers, and a C++17/GCC toolchain with a discoverable `libgcc.a`.
 
 Use the installation and compatibility instructions for the stack on your machine; this repository does not provide a universal version matrix. Some tasks also import additional packages, particularly at level 4. Inspect the selected task's imports before starting a large run.
@@ -110,7 +110,6 @@ source "$CANN_SET_ENV"
 python - <<'PY'
 import torch
 import torch_npu
-import pybind11
 
 print("PyTorch:", torch.__version__)
 print("torch_npu:", torch_npu.__version__)
