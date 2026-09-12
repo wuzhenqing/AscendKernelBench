@@ -2,27 +2,29 @@
 
 from __future__ import annotations
 
-import json
 import sys
-from pathlib import Path
+
+from .io_util import load_cfg_argv, pop_required_path, write_json_atomic
 
 
 def main(argv: list[str]) -> None:
-    if len(argv) != 2:
-        print(f"Usage: {argv[0]} <cfg.json>", file=sys.stderr)
-        sys.exit(2)
+    """Read ``cfg.json``, evaluate one sample, and write ``result_path``.
 
-    cfg = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
-    result_path = Path(cfg.pop("result_path"))
-    from .eval import _fail, eval_sample_on_device
+    Args:
+        argv: ``[prog, cfg.json]``.
+    """
+    cfg = load_cfg_argv(argv)
+    result_path = pop_required_path(cfg, "result_path")
+    from .eval_device import eval_sample_on_device
+    from .eval_result import fail_result
 
     try:
         result = eval_sample_on_device(**cfg)
     except Exception as exc:
         # Build failures return earlier with compiled=False; anything escaping
         # to here happened after the build, so it is a runtime failure.
-        result = _fail(compiled=True, runtime_error=repr(exc))
-    result_path.write_text(json.dumps(result), encoding="utf-8")
+        result = fail_result(compiled=True, runtime_error=repr(exc))
+    write_json_atomic(result_path, result)
 
 
 if __name__ == "__main__":

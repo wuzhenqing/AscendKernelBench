@@ -13,18 +13,29 @@ imply score comparability across hardware/baselines.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+from .sol import mean_sol_score
 
 FAST_P_THRESHOLDS = (0.0, 0.5, 0.8, 1.0, 1.5, 2.0)
 
 
 def _threshold_name(t: float) -> str:
-    """KernelBench-style key: fast_0, fast_0.5, fast_1, ..."""
+    """Return the KernelBench-style key, for example ``fast_0.5``."""
     return f"fast_{t:g}"
 
 
-def sample_speedup(sample: dict) -> float | None:
-    """Speedup (ref mean / kernel mean) of one sample, or None if unavailable."""
+def sample_speedup(sample: Mapping[str, Any]) -> float | None:
+    """Return speedup (ref mean / kernel mean), or None if unavailable.
+
+    Args:
+        sample: One evaluation result dict.
+
+    Returns:
+        Speedup ratio, or None when the sample is incorrect, flagged, or
+        missing an NPU baseline.
+    """
     if not sample.get("correctness"):
         return None
     if (sample.get("metadata") or {}).get("excessive_speedup"):
@@ -36,7 +47,7 @@ def sample_speedup(sample: dict) -> float | None:
     return None
 
 
-def fast_p(samples: Sequence[dict]) -> dict[str, float]:
+def fast_p(samples: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     """fast_p over a flat sample list; denominator includes all samples.
 
     fast_0 is the correctness rate: every correct sample counts, including
@@ -44,6 +55,12 @@ def fast_p(samples: Sequence[dict]) -> dict[str, float]:
     speedup exists) and samples flagged for excessive speedup — the flag only
     excludes them from the p > 0 speedup thresholds and the geometric mean
     (docs/guide/results.md: marked for manual review, not auto-failed).
+
+    Args:
+        samples: Flat list of evaluation result dicts.
+
+    Returns:
+        Mapping from ``fast_p`` keys to rates in ``[0, 1]``.
     """
     total = len(samples)
     if total == 0:
@@ -64,52 +81,114 @@ def fast_p(samples: Sequence[dict]) -> dict[str, float]:
     return result
 
 
-def geometric_mean_speedup(samples: Sequence[dict]) -> float:
-    """Geometric mean speedup over correct, non-flagged samples."""
-    speedups = [s for s in (sample_speedup(x) for x in samples) if s is not None]
+def geometric_mean_speedup(samples: Sequence[Mapping[str, Any]]) -> float:
+    """Geometric mean speedup over correct, non-flagged samples.
+
+    Args:
+        samples: Flat list of evaluation result dicts.
+
+    Returns:
+        Geometric mean, or ``0.0`` when no eligible speedup exists.
+    """
+    speedups = [
+        s for s in (sample_speedup(x) for x in samples) if s is not None
+    ]
     if not speedups:
         return 0.0
     return math.exp(sum(math.log(s) for s in speedups) / len(speedups))
 
 
 def pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
-    """Standard unbiased pass@k estimator (KernelBench / HumanEval)."""
+    """Standard unbiased pass@k estimator (KernelBench / HumanEval).
+
+    Args:
+        num_samples: Collected samples for one problem.
+        num_correct: Correct samples among them.
+        k: Draw size.
+
+    Returns:
+        Unbiased pass@k estimate in ``[0, 1]``.
+    """
     if num_samples < k:
         return float(num_correct > 0)
     if num_samples - num_correct < k:
         return 1.0
-    return 1.0 - math.comb(num_samples - num_correct, k) / math.comb(num_samples, k)
+    return 1.0 - math.comb(num_samples - num_correct, k) / math.comb(
+        num_samples, k
+    )
 
 
-def summarize_eval_results(eval_results: dict[str, list[dict]]) -> dict:
-    """Aggregate an eval_results.json mapping into headline metrics."""
+def summarize_eval_results(
+    eval_results: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """Aggregate an eval_results.json mapping into headline metrics.
+
+    Args:
+        eval_results: Mapping of problem id to per-sample result dicts.
+
+    Returns:
+        Headline counts, reference-mode / flag tallies, ``fast_p``,
+        geometric-mean speedup, optional mean SOL score, and per-problem
+        tallies.
+    """
     all_samples = [s for samples in eval_results.values() for s in samples]
     compiled = sum(1 for s in all_samples if s.get("compiled"))
     correct = sum(1 for s in all_samples if s.get("correctness"))
-    per_problem = {}
+
+    def _meta(sample: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Return ``sample['metadata']`` when it is a mapping, else ``{}``."""
+        metadata = sample.get("metadata") or {}
+        return metadata if isinstance(metadata, Mapping) else {}
+
+    cpu_reference = sum(
+        1 for sample in all_samples if _meta(sample).get("reference") == "cpu"
+    )
+    npu_reference = sum(
+        1 for sample in all_samples if _meta(sample).get("reference") == "npu"
+    )
+    flagged = sum(
+        1 for sample in all_samples if _meta(sample).get("excessive_speedup")
+    )
+    per_problem: dict[str, dict[str, Any]] = {}
     for problem_id, samples in eval_results.items():
         n = len(samples)
         c = sum(1 for s in samples if s.get("correctness"))
-        per_problem[problem_id] = {
+        per_problem[str(problem_id)] = {
             "num_samples": n,
             "num_correct": c,
             "any_correct": c > 0,
         }
-    return {
+    summary: dict[str, Any] = {
         "total_samples": len(all_samples),
         "total_problems": len(eval_results),
         "compiled": compiled,
         "correct": correct,
+        "cpu_reference": cpu_reference,
+        "npu_reference": npu_reference,
+        "excessive_speedup": flagged,
         "fast_p": fast_p(all_samples),
-        "geometric_mean_speedup_correct_only": geometric_mean_speedup(all_samples),
+        "geometric_mean_speedup_correct_only": geometric_mean_speedup(
+            all_samples
+        ),
+        "mean_sol_score": mean_sol_score(all_samples),
         "per_problem": per_problem,
     }
+    return summary
 
 
 def compute_pass_at_k(
     eval_results: dict[str, list[dict]], ks: Sequence[int] = (1, 5, 10)
 ) -> dict[str, dict[str, float]]:
-    """pass@k per problem and averaged, for multi-sample runs."""
+    """Compute pass@k per problem and the unweighted average.
+
+    Args:
+        eval_results: Mapping of problem id to per-sample result dicts.
+        ks: Requested ``k`` values. A problem contributes to ``pass@k``
+            only when it has enough samples (except ``k == 1``).
+
+    Returns:
+        ``{"per_problem": ..., "average": ...}``.
+    """
     per_problem: dict[str, dict[str, float]] = {}
     for problem_id, samples in eval_results.items():
         n = len(samples)

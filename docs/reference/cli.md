@@ -134,6 +134,6 @@ python scripts/analyze.py --run-name relu-10
 | --- | --- | --- |
 | `--run-name NAME` | Required | Read `runs/<name>/eval_results.json`. |
 
-The script recalculates metrics in memory and prints them. It writes no report files, does not collect per-sample results, and does not update `pass_at_k_results.json`. A missing aggregate file causes a nonzero exit.
+The script recalculates metrics in memory and prints them, including `fast_p`, geometric-mean speedup, `pass@k`, and mean roofline SOL score when present. It writes no report files, does not collect per-sample results, and does not update `pass_at_k_results.json`. A missing aggregate file causes a nonzero exit.
 
 See [configuration](/reference/configuration) for defaults and environment variables, and [results](/guide/results) for the result schema and scoring rules.

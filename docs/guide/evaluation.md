@@ -33,7 +33,7 @@ Use `--config path/to/eval.yaml` for a different configuration. The default valu
 | `seed` | `42` | Base seed for initialization, correctness seed generation, and timing. |
 | `precision` | `fp32` | Floating-point input/model dtype. |
 | `num_correct_trials` | `5` | All initial correctness trials must pass. |
-| `num_warmup` | `3` | Warmup calls per timed model. |
+| `num_warmup` | `10` | Warmup calls per timed model (SOL-ExecBench-style isolation). |
 | `num_perf_trials` | `100` | Retained NPU-event measurements per timed model. |
 | `excessive_speedup` | `10.0` | Speedups strictly above this value are flagged for review. |
 | `build_timeout` | `600` seconds | Separate budget for CMake configure and CMake build. |
@@ -46,7 +46,7 @@ The batch evaluator visits every complete sample directory sequentially and re-e
 
 For each sample, the host checks that `custom_op.asc` and `model_new.py` exist and applies the [candidate static checks](/task_authoring#candidate-rules-and-checks). A static violation produces a failed result without launching the worker.
 
-An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. In `aclnn` mode the worker builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. `jit` mode is reserved and not implemented. Results travel through a temporary JSON file rather than standard output.
+An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. That worker calls `eval_device.eval_sample_on_device`. In `aclnn` mode it builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. `jit` mode is reserved and not implemented. Results travel through a temporary JSON file rather than standard output.
 
 The host allows `eval_timeout + 2 * build_timeout` seconds for the whole worker: 1,500 seconds with the defaults. There is no separate 300-second timer started after compilation. On an overall timeout, the host attempts to kill the worker's entire process group and records a failure.
 
@@ -108,13 +108,17 @@ The result records this choice in `metadata.timing_fresh_inputs`. Input preparat
 
 ### Event sequence
 
-For each timed model, the timer performs three warmups by default, synchronizing after each, then calls `torch.npu.empty_cache()` to release allocator caches. For every subsequent trial, it:
+For each timed model, the timer performs ten warmups by default, synchronizing after each, then calls `torch.npu.empty_cache()` to release allocator caches. For every subsequent trial, it:
 
 1. Refreshes inputs when enabled and synchronizes the device.
 2. Creates a start/end NPU event pair.
-3. Thrashes L2 with a 256 MiB tensor fill before recording the start event.
+3. Thrashes L2 with a buffer of `max(256 MiB, 2 × profile L2)` (384 MiB on the default 910B2 profile) before recording the start event.
 4. Records the start event, invokes the model, and records the end event.
 5. Synchronizes and reads elapsed event time in milliseconds.
+
+When both candidate and NPU-reference means are available, the worker also records a roofline SOL bound (`bytes_moved / profile bandwidth`, optionally `max`ed with `FLOPS / peak_tflops` when the task declares a FLOP count) and a SOL-ExecBench-style `sol_score`. The bound is a documented profile estimate, not a NVIDIA SOLAR characterization. See [results and scoring](/guide/results).
+
+Every scored sample also records a protocol snapshot (`seed`, trial counts, warmup, `l2_clear_size`) and the worker software stack (PyTorch, torch-npu, device name, and CANN version when the environment exposes it).
 
 The first measured trial is discarded. With the defaults, there are 101 measured calls and 100 retained values per model, in addition to warmups. The L2-thrashing operation is outside the event window. The reported numbers are device-event latency for the invoked model, not end-to-end generation/build time or a host wall-clock benchmark.
 

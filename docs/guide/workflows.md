@@ -99,7 +99,7 @@ After evaluation completes, run:
 python scripts/analyze.py --run-name activations-10
 ```
 
-The report shows compile and correctness counts, `fast_p`, geometric mean speedup, `pass@k`, and per-problem detail. Analysis reads the aggregate `eval_results.json`; it does not evaluate source files or refresh that aggregate from per-sample results.
+The report shows compile and correctness counts, NPU/CPU-reference coverage, flagged excessive speedups, `fast_p`, geometric mean speedup, mean roofline SOL score when present, `pass@k`, and per-problem detail. Analysis reads the aggregate `eval_results.json`; it does not evaluate source files or refresh that aggregate from per-sample results.
 
 You can copy the run back to macOS for analysis. For reporting alone, `runs/activations-10/eval_results.json` is sufficient. Keep the full run if you also want to inspect generated code or compilation diagnostics.
 

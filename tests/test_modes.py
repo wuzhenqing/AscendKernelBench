@@ -1,5 +1,7 @@
 import pytest
 
+from ascend_kernel_bench.config import load_eval_config, load_hardware_profile
+from ascend_kernel_bench.dataset import load_task
 from ascend_kernel_bench.modes import (
     ACLNN_MODE,
     DEFAULT_OPERATOR_MODE,
@@ -10,8 +12,6 @@ from ascend_kernel_bench.modes import (
     require_implemented_mode,
 )
 from ascend_kernel_bench.prompt import build_prompt
-from ascend_kernel_bench.config import load_eval_config, load_hardware_profile
-from ascend_kernel_bench.dataset import load_task
 
 
 def test_default_mode_is_aclnn() -> None:

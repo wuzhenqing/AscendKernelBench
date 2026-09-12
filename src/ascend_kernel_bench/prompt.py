@@ -52,7 +52,8 @@ exactly two fenced code blocks, tagged with their filenames:
    a. kernel class: `Init` (data partition across cores, GM buffers) and
       `Process` (UB allocation, copy-in, compute, copy-out);
    b. the kernel function annotated `__global__ __vector__`, calling
-      `AscendC::InitSocState()`, `Init`, `Process`, `AscendC::PipeBarrier<PIPE_ALL>()`;
+      `AscendC::InitSocState()`, `Init`, `Process`,
+      `AscendC::PipeBarrier<PIPE_ALL>()`;
    c. host wrapper taking `const at::Tensor&` arguments, fetching the current
       NPU stream via `c10_npu::getCurrentNPUStream().stream(false)`,
       allocating outputs, launching with `<<<numBlocks, 0, stream>>>`;
@@ -85,7 +86,8 @@ exactly two fenced code blocks, tagged with their filenames:
 
 Do not output any test code, `if __name__ == "__main__"` blocks, or prose
 between the two code blocks. In model_new.py, ALL tensor compute must go
-through `torch.ops.custom_op`: no torch native operators in any form — free functions
+through `torch.ops.custom_op`: no torch native operators in any form —
+free functions
 (`torch.matmul`), tensor methods (`x.softmax(...)`), operators (`A @ B`,
 `A + B` on tensors), or comparisons on tensor data — and no nn.functional,
 torch_npu/aclnn shortcuts, CPU/NumPy fallbacks, try/except, dynamic imports
@@ -116,7 +118,14 @@ class PromptExample:
 
 
 def load_examples() -> list[PromptExample]:
-    """Load verified few-shot example assets shipped with the engine."""
+    """Load verified few-shot example assets shipped with the engine.
+
+    Returns:
+        Examples sorted by directory name.
+
+    Raises:
+        OSError: If an example directory is missing a required file.
+    """
     examples: list[PromptExample] = []
     for example_dir in sorted(PROMPT_EXAMPLES_DIR.iterdir()):
         if not example_dir.is_dir():
@@ -137,6 +146,7 @@ def load_examples() -> list[PromptExample]:
 
 
 def _problem_statement(task: Task) -> str:
+    """Return the English problem-statement block for ``task``."""
     return f"""\
 ## Problem Statement
 
@@ -150,12 +160,19 @@ Ascend C kernel on the target NPU.
 
 
 def _hardware_block(hw: HardwareProfile) -> str:
+    """Return the English hardware-contract block from ``hw``."""
     dtypes = ", ".join(hw.supported_dtypes)
+    cores = f"{hw.ai_core_num}"
+    if hw.cube_core_num or hw.vector_core_num:
+        cores = (
+            f"{hw.ai_core_num} (cube={hw.cube_core_num}, "
+            f"vector={hw.vector_core_num})"
+        )
     return f"""\
 ## Target Hardware Contract
 
 - SoC: {hw.soc_version} (CMake arch `{hw.cmake_arch}`)
-- AI cores: {hw.ai_core_num}; UB budget per core: {hw.ub_size_kb} KB
+- AI cores: {cores}; UB budget per core: {hw.ub_size_kb} KB
 - HBM: {hw.hbm_gb} GB, bandwidth ~{hw.memory_bandwidth_gbps} GB/s
 - Supported dtypes: {dtypes}
 
@@ -166,6 +183,7 @@ def _hardware_block(hw: HardwareProfile) -> str:
 
 
 def _examples_block(examples: list[PromptExample]) -> str:
+    """Render verified example pairs as prompt markdown."""
     parts = ["## Example\n"]
     for example in examples:
         parts.append(
@@ -186,7 +204,23 @@ def build_prompt(
     examples: list[PromptExample] | None = None,
     operator_mode: str = ACLNN_MODE,
 ) -> str:
-    """Assemble the full generation prompt for one task."""
+    """Assemble the full generation prompt for one task.
+
+    Args:
+        task: Reference KernelBench task.
+        hardware: Profile injected into the hardware-contract block.
+        mode: ``zero_shot``, ``one_shot``, or ``few_shot``.
+        examples: Optional override of bundled examples.
+        operator_mode: Must be implemented; JIT is rejected.
+
+    Returns:
+        The complete English user prompt (no system message).
+
+    Raises:
+        OperatorModeError: If ``operator_mode`` is reserved or unknown.
+        ValueError: If ``mode`` is unknown or examples are required
+            but missing.
+    """
     require_implemented_mode(operator_mode)
     if mode not in {"zero_shot", "one_shot", "few_shot"}:
         raise ValueError(f"Unknown prompt mode: {mode}")

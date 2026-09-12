@@ -38,16 +38,26 @@ class Task:
 
     @property
     def problem_id(self) -> str:
-        """KernelBench-compatible problem identifier used in eval_results.json."""
+        """KernelBench problem id stored in ``eval_results.json``."""
         return self.task_id
 
 
 def _validate_contract(task_py: str, task_id: str) -> None:
-    """Statically verify the task contract without executing task code."""
+    """Statically verify the task contract without executing task code.
+
+    Args:
+        task_py: Source of the KernelBench task file.
+        task_id: Identifier used in error messages.
+
+    Raises:
+        ValueError: If the file does not parse or lacks required symbols.
+    """
     try:
         tree = ast.parse(task_py)
     except SyntaxError as exc:
-        raise ValueError(f"{task_id}: task source has a syntax error: {exc}") from exc
+        raise ValueError(
+            f"{task_id}: task source has a syntax error: {exc}"
+        ) from exc
     top_level = {getattr(n, "name", None) for n in tree.body}
     top_level |= {
         n.targets[0].id
@@ -64,11 +74,25 @@ def _validate_contract(task_py: str, task_id: str) -> None:
 
 
 def load_task(task_id: str, kb_root: Path | None = None) -> Task:
-    """Load one task by id (``level{L}/{file_stem}``)."""
+    """Load one task by id (``level{L}/{file_stem}``).
+
+    Args:
+        task_id: Identifier such as ``level1/19_ReLU``.
+        kb_root: Optional KernelBench root. Defaults to the vendored tree.
+
+    Returns:
+        A :class:`Task` with source and path populated.
+
+    Raises:
+        ValueError: If ``task_id`` is malformed or the contract is missing.
+        FileNotFoundError: If the task file does not exist.
+    """
     root = Path(kb_root) if kb_root else KB_ROOT
     match = TASK_ID_RE.match(task_id)
     if not match:
-        raise ValueError(f"Invalid task id {task_id!r}; expected 'level{{L}}/{{stem}}'")
+        raise ValueError(
+            f"Invalid task id {task_id!r}; expected 'level{{L}}/{{stem}}'"
+        )
     task_file = root / task_id
     if task_file.is_dir():
         task_file = task_file / "task.py"  # tolerate legacy migrated layout
@@ -88,15 +112,28 @@ def load_task(task_id: str, kb_root: Path | None = None) -> Task:
 
 
 def _sort_key(path: Path) -> tuple[int, str]:
+    """Return a numeric-then-name sort key for ``19_ReLU.py``-style stems."""
     match = STEM_NUM_RE.match(path.stem)
     return (int(match.group("num")) if match else 0, path.stem)
 
 
-def discover_tasks(level: int | None = None, kb_root: Path | None = None) -> list[Task]:
-    """Discover all tasks (optionally one level) under the KernelBench root."""
+def discover_tasks(
+    level: int | None = None, kb_root: Path | None = None
+) -> list[Task]:
+    """Discover all tasks (optionally one level) under the KernelBench root.
+
+    Args:
+        level: When set, only that ``levelN`` directory is scanned.
+        kb_root: Optional KernelBench root. Defaults to the vendored tree.
+
+    Returns:
+        Tasks sorted by level directory, then numeric file stem.
+    """
     root = Path(kb_root) if kb_root else KB_ROOT
     tasks: list[Task] = []
-    level_dirs = [root / f"level{level}"] if level else sorted(root.glob("level*"))
+    level_dirs = (
+        [root / f"level{level}"] if level else sorted(root.glob("level*"))
+    )
     for level_dir in level_dirs:
         if not level_dir.is_dir():
             continue

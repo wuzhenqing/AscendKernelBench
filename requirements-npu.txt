@@ -1,0 +1,9 @@
+# NPU runtime extras. Install inside the `akb` conda env after CANN is present.
+#   conda activate akb
+#   source /usr/local/Ascend/cann-9.1.0/set_env.sh
+#   python -m pip install -r requirements-npu.txt
+#
+# Matches Ascend COMPATIBILITY.en.md for CANN 9.1.0: PyTorch 2.10.0 +
+# torch-npu 2.10.0.post* (post6 is the current 2.10 patch on PyPI).
+torch==2.10.0
+torch-npu==2.10.0.post6

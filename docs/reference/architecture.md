@@ -37,13 +37,21 @@ KernelBench task + hardware profile
 | `llm.py` | Endpoint requests, structured/fenced response handling, and basic deliverable validation. |
 | `rundir.py` | Run paths, generated files, per-sample collection, and atomic aggregate writes. |
 | `checker.py` | Heuristic Python AST/pattern checks and Ascend C source checks. |
-| `eval.py` | Host orchestration plus worker-side build, correctness, and timing logic. |
+| `eval.py` | Host orchestration: static check, worker subprocess, result persistence. |
+| `eval_device.py` | Worker-side build, seeded correctness, NPU-event timing, and SOL attach. |
+| `eval_result.py` | KernelBench-compatible result payloads and protocol-snapshot metadata. |
 | `worker.py` | JSON-config subprocess entry point and result-file output. |
 | `modes.py` | Operator-mode names: `aclnn` (implemented) and `jit` (reserved). |
 | `build.py` and `build_template/` | CANN environment capture and the ACLNN CMake project that writes `libcustom_op.so`. |
 | `loader.py` | `torch.ops.load_library` of that sample-local shared library (never a global install). |
-| `timing.py` | NPU events, L2 thrashing, and timing statistics. |
-| `score.py` | Sample speedups, `fast_p`, geometric mean speedup, and pass@k. |
+| `timing.py` | NPU events, L2 flush sized from the hardware profile, and timing statistics. |
+| `compare.py` | Dtype-aware output matching and tensor-byte accounting. |
+| `sol.py` | Roofline bound and SOL-ExecBench-style score. |
+| `runtime.py` | CANN / PyTorch / torch-npu / device identity recorded in result metadata. |
+| `cli_util.py` | Shared CLI flags, YAML/hardware loading, task selection, generation-config records, progress bars, and result-status lines. |
+| `io_util.py` | Atomic JSON/YAML writes, JSON-object reads, and worker cfg loading. |
+| `baseline_worker.py` | Isolated eager-reference timing used by `scripts/baseline.py`. |
+| `score.py` | Sample speedups, `fast_p`, geometric mean speedup, pass@k, and mean SOL. |
 
 The Python modules are in [`src/ascend_kernel_bench/`](https://github.com/wuzhenqing/AscendKernelBench/tree/main/src/ascend_kernel_bench). The scripts under [`scripts/`](https://github.com/wuzhenqing/AscendKernelBench/tree/main/scripts) expose the workflows without a separate installed command-line executable.
 
@@ -79,7 +87,7 @@ These checks establish that response fields resemble the expected files; they do
 
 ## Evaluation boundary
 
-The host reads sample source and runs static checks before launching `python -m ascend_kernel_bench.worker`. A temporary config JSON carries the task source, sample path, profile architecture, and resolved evaluation settings into the worker. A separate JSON result file carries the outcome back.
+The host (`eval.py`) reads sample source and runs static checks before launching `python -m ascend_kernel_bench.worker`. A temporary config JSON carries the task source, sample path, profile architecture, and resolved evaluation settings into the worker. The worker calls `eval_device.eval_sample_on_device` and writes a JSON result file back.
 
 NPU imports live inside worker/timing functions so source inspection and host-side utilities do not initialize an NPU runtime. The worker loads generated code, compiles native code, and uses the selected NPU. Its process is separate but has the invoking user's privileges; this is not a security sandbox.
 

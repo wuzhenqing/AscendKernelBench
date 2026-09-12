@@ -2,6 +2,8 @@
 
 from collections import Counter
 
+import pytest
+
 from ascend_kernel_bench.dataset import (
     KERNELBENCH_LEVEL_COUNTS,
     KERNELBENCH_TASK_COUNT,
@@ -22,7 +24,15 @@ def test_task_ids_are_level_stem() -> None:
     ids = {task.task_id for task in tasks}
     assert "level1/19_ReLU" in ids
     assert "level1/20_LeakyReLU" in ids
-    assert all("/" in task.task_id and not task.task_id.endswith(".py") for task in tasks)
+    assert all(
+        "/" in task.task_id and not task.task_id.endswith(".py")
+        for task in tasks
+    )
+
+
+def test_invalid_task_id_rejected() -> None:
+    with pytest.raises(ValueError, match="Invalid task id"):
+        load_task("not-a-task")
 
 
 def test_load_task_keeps_reference_source() -> None:

@@ -39,7 +39,7 @@ The scripts add `src/` to their own import path, but an evaluation worker starts
 
 ### Missing `torch` or `torch_npu`
 
-The base package dependencies support generation and analysis. They do not install the Ascend runtime stack. On the Linux evaluation host, use the same Python environment for the benchmark and its compatible PyTorch / `torch_npu` installation. The CMake build receives the running interpreter as `Python3_EXECUTABLE` and discovers those packages through it.
+The base package dependencies support generation and analysis. They do not install the Ascend runtime stack. On a Linux host with CANN 9.1.0, recreate the experiment environment with `conda env create -f environment.yml`, then `conda activate akb` and source `set_env.sh` (see [getting started](/guide/getting-started)). Use that same interpreter for evaluation; the CMake build receives it as `Python3_EXECUTABLE` and discovers PyTorch / `torch_npu` through it.
 
 Do not try to resolve a missing `torch_npu` import on macOS by substituting a CPU evaluation path. Move the saved sources to the prepared Ascend host instead. Some tasks also import optional libraries; inspect the task's imports when a reference module cannot load.
 

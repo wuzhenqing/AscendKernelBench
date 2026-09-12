@@ -19,6 +19,7 @@ An explicit task load also accepts the legacy `level{L}/{task}/task.py` layout, 
 | `get_inputs()` | Returns a fresh list of positional forward arguments. Create tensors on CPU; the evaluator moves top-level tensor arguments to the target NPU. |
 | `TOLERANCE` | Optional, nonempty dictionary such as `{"atol": 1e-3, "rtol": 1e-3}`. Overrides the configured floating-point comparison tolerances. |
 | `custom_check(ref_out, out)` | Optional predicate replacing the default output comparison. Return a Boolean-compatible value. |
+| `FLOPS` or `NUM_FLOPS` | Optional positive number. When set, and the hardware profile has `peak_tflops` for the active precision, the SOL bound includes a compute term. The vendored corpus does not set this. |
 
 Use a tensor or a tuple/list of tensors for outputs. The default matcher recursively handles tuples and lists, but CPU fallback only transfers top-level tensor outputs and one level of tuple/list members to CPU. Nested tensor input containers are also not recursively transferred. Keep tensor arguments and returned collections flat if the task must support both reference modes.
 

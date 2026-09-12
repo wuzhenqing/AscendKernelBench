@@ -1,8 +1,12 @@
-"""Prompt construction stays English and describes process-local ACLNN loading."""
+"""Prompt construction stays English and describes local ACLNN loading."""
 
 from ascend_kernel_bench.config import load_hardware_profile
 from ascend_kernel_bench.dataset import load_task
-from ascend_kernel_bench.prompt import SYSTEM_PROMPT, build_prompt, load_examples
+from ascend_kernel_bench.prompt import (
+    SYSTEM_PROMPT,
+    build_prompt,
+    load_examples,
+)
 
 
 def test_system_prompt_is_english_process_local() -> None:
@@ -33,7 +37,10 @@ def test_aclnn_prompt_forbids_opp_install() -> None:
 
 def test_few_shot_includes_both_examples() -> None:
     examples = load_examples()
-    assert [ex.name for ex in examples] == ["001_elementwise_add", "002_leaky_relu"]
+    assert [ex.name for ex in examples] == [
+        "001_elementwise_add",
+        "002_leaky_relu",
+    ]
     prompt = build_prompt(
         load_task("level1/19_ReLU"),
         load_hardware_profile("ascend910b2"),

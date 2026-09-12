@@ -19,14 +19,30 @@ class LoadError(RuntimeError):
 
 
 def has_torch_library(source: str) -> bool:
+    """Return True if ``source`` registers a ``TORCH_LIBRARY`` operator.
+
+    Args:
+        source: Generated ``custom_op.asc`` text.
+
+    Returns:
+        True when the ``TORCH_LIBRARY`` marker is present.
+    """
     return "TORCH_LIBRARY" in source
 
 
 def load_process_local_op(so_path: Path, source: str = "") -> None:
-    """``torch.ops.load_library`` ``so_path`` so ``torch.ops.custom_op.*`` works.
+    """Load ``so_path`` so ``torch.ops.custom_op.*`` becomes callable.
 
     ``source`` is optional and used only to fail fast when the generated
     file is not a ``TORCH_LIBRARY`` operator.
+
+    Args:
+        so_path: Process-local ``libcustom_op.so``.
+        source: Optional ``custom_op.asc`` text used for a fast marker check.
+
+    Raises:
+        LoadError: If the file is missing, lacks ``TORCH_LIBRARY``, or
+            ``torch.ops.load_library`` fails.
     """
     so_path = Path(so_path).resolve()
     if not so_path.is_file():
@@ -39,12 +55,21 @@ def load_process_local_op(so_path: Path, source: str = "") -> None:
     try:
         import torch
     except ImportError as exc:
-        raise LoadError("torch is required to load a TORCH_LIBRARY operator") from exc
+        raise LoadError(
+            "torch is required to load a TORCH_LIBRARY operator"
+        ) from exc
     try:
         torch.ops.load_library(str(so_path))
     except Exception as exc:
-        raise LoadError(f"torch.ops.load_library({so_path}) failed: {exc!r}") from exc
+        raise LoadError(
+            f"torch.ops.load_library({so_path}) failed: {exc!r}"
+        ) from exc
 
 
 def expected_library_name() -> str:
+    """Return the process-local shared-library filename the build must emit.
+
+    Returns:
+        ``libcustom_op.so``.
+    """
     return ACLNN_SHARED_LIBRARY_NAME

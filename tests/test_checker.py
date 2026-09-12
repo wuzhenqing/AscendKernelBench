@@ -38,8 +38,18 @@ def test_pybind_binding_is_rejected() -> None:
     assert any("TORCH_LIBRARY" in item for item in violations)
 
 
+def test_host_aten_compute_is_rejected() -> None:
+    source = _minimal_kernel(
+        _TORCH_LIB_BINDING + "\nvoid h(at::Tensor x) { at::relu(x); }\n"
+    )
+    violations = check_custom_op_asc(source)
+    assert any("at::relu" in item for item in violations)
+
+
 def test_vendor_aclnn_still_banned() -> None:
-    source = _minimal_kernel(_TORCH_LIB_BINDING + "\nvoid h() { aclnnAdd(nullptr); }\n")
+    source = _minimal_kernel(
+        _TORCH_LIB_BINDING + "\nvoid h() { aclnnAdd(nullptr); }\n"
+    )
     violations = check_custom_op_asc(source)
     assert any("aclnn" in item for item in violations)
 
@@ -96,4 +106,97 @@ class ModelNew(nn.Module):
     def forward(self, x):
         return torch.ops.aten.add(x, x)
 """
-    assert any("vendor" in item or "aten" in item for item in check_model_new(vendor))
+    assert any(
+        "vendor" in item or "aten" in item for item in check_model_new(vendor)
+    )
+
+
+def _wrapper(forward_body: str) -> str:
+    return f"""
+import torch
+import torch.nn as nn
+
+class ModelNew(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, x):
+        {forward_body}
+"""
+
+
+def test_model_new_rejects_tensor_method_and_add() -> None:
+    softmax = check_model_new(_wrapper("return x.softmax(-1)"))
+    assert any("softmax" in item for item in softmax)
+    added = check_model_new(_wrapper("return torch.ops.custom_op.run(x) + x"))
+    assert any("arithmetic" in item for item in added)
+
+
+def test_model_new_allows_shape_arithmetic() -> None:
+    source = _wrapper(
+        "n = x.shape[0] * 2\n        return torch.ops.custom_op.run(x)"
+    )
+    assert check_model_new(source) == []
+
+
+def test_model_new_allows_nn_construction_not_call() -> None:
+    allowed = """
+import torch
+import torch.nn as nn
+
+class ModelNew(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = nn.Linear(4, 4)
+    def forward(self, x):
+        return torch.ops.custom_op.run(x, self.lin.weight)
+"""
+    assert check_model_new(allowed) == []
+
+    called = """
+import torch
+import torch.nn as nn
+
+class ModelNew(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = nn.Linear(4, 4)
+    def forward(self, x):
+        return self.lin(x)
+"""
+    violations = check_model_new(called)
+    assert any("nn layer" in item for item in violations)
+    assert any("never calls torch.ops.custom_op" in item for item in violations)
+
+
+def test_model_new_resolves_import_aliases() -> None:
+    source = """
+import torch as t
+import torch.nn as nn
+
+class ModelNew(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, x):
+        return t.ops.custom_op.run(x)
+"""
+    assert check_model_new(source) == []
+
+    from_nn = """
+import torch
+from torch.nn import Linear, Module
+
+class ModelNew(Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = Linear(4, 4)
+    def forward(self, x):
+        return torch.ops.custom_op.run(x, self.lin.weight)
+"""
+    assert check_model_new(from_nn) == []
+
+
+def test_model_new_rejects_functional_and_torch_compute() -> None:
+    functional = _wrapper("return torch.nn.functional.relu(x)")
+    assert any("functional" in item for item in check_model_new(functional))
+    matmul = _wrapper("return torch.matmul(x, x)")
+    assert any("matmul" in item for item in check_model_new(matmul))

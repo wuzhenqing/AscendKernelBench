@@ -22,7 +22,7 @@ CLI settings are not automatically recovered from an existing run's `generation_
 | `precision` | `fp32` | Floating-point precision. Use `fp32`, `fp16`, or `bf16`. Integer and Boolean tensors retain their types. |
 | `tolerances` | See below | Absolute and relative tolerances by precision. |
 | `num_perf_trials` | `100` | Number of measured trials for each timed implementation. |
-| `num_warmup` | `3` | Number of warmup calls before measured trials. |
+| `num_warmup` | `10` | Number of warmup calls before measured trials. |
 | `excessive_speedup` | `10.0` | Flag speedup strictly above this ratio for review. Flagged samples remain eligible for correctness metrics but are excluded from speedup metrics. |
 | `build_timeout` | `600` | Seconds allowed for CMake configure and for build, separately. |
 | `eval_timeout` | `300` | Evaluation component of the host worker time budget; also the standalone baseline worker timeout. |
@@ -64,7 +64,7 @@ hardware: ascend910b2
 precision: fp32
 seed: 42
 num_correct_trials: 5
-num_warmup: 3
+num_warmup: 10
 num_perf_trials: 100
 excessive_speedup: 10.0
 build_timeout: 600
@@ -115,13 +115,13 @@ These are configuration values, not automatic hardware detection or a claim that
 | `cmake_arch` | Yes | Passed to `CMAKE_ASC_ARCHITECTURES` during compilation. |
 | `ai_core_num` | Yes | Core-count value included in the prompt. |
 | `ub_size_kb` | Yes | Per-core UB capacity description included in the prompt. |
-| `l2_cache_mb` | No; defaults to `0` | Retained in the loaded profile; the current timing code does not size its cache-flush buffer from this value. |
+| `l2_cache_mb` | No; defaults to `0` | Used to size the timing L2 flush to `max(256 MiB, 2 × L2)`. |
 | `hbm_gb` | No; defaults to `0` | HBM capacity description included in the prompt. |
-| `memory_bandwidth_gbps` | No; defaults to `0` | Bandwidth description included in the prompt. |
+| `memory_bandwidth_gbps` | No; defaults to `0` | Prompt bandwidth and the roofline SOL bound. |
+| `cube_core_num` / `vector_core_num` | No; defaults to `0` | Included in the prompt core-count line when set. |
+| `peak_tflops` | No; defaults to `{}` | Optional per-precision TFLOPS. Used only when a task also declares a positive top-level `FLOPS` or `NUM_FLOPS` constant; otherwise the SOL bound is memory-only. |
 | `supported_dtypes` | No; defaults to `[]` | Data type names included in the prompt; does not itself enforce runtime support. |
 | `api_style` | No; defaults to an empty string | Free-form instructions inserted into the hardware prompt block. |
-
-The loader reads only these fields. Additional keys such as the default profile's `cube_core_num` and `vector_core_num` are not separate fields in `HardwareProfile` and are not independently injected into the prompt.
 
 Pass a custom profile with `--hardware configs/hardware/my-device.yaml`, or save it under `configs/hardware/my-device.yaml` and use `--hardware my-device`. An existing file path is tried first, relative to the current working directory when applicable; otherwise, the loader looks for `<repository>/configs/hardware/<value>.yaml`.
 

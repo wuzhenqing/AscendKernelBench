@@ -13,6 +13,12 @@ ub_size_kb: 192
 l2_cache_mb: 192
 hbm_gb: 64
 memory_bandwidth_gbps: 1600
+# Datasheet-order estimates for the optional roofline SOL bound only.
+# Not a measured characterization of this machine and not NVIDIA SOLAR.
+peak_tflops:
+  fp32: 47.0
+  fp16: 376.0
+  bf16: 188.0
 supported_dtypes: [fp16, fp32, bf16, int32, int64]
 api_style: |
   - Kernel functions are annotated `__global__ __vector__` (vector core), NOT legacy `__aicore__`.

@@ -25,12 +25,14 @@ _FENCE_EDGE_RE = re.compile(
 
 
 def _strip_fence(value: str) -> str:
-    """Remove a single outer fenced-code-block wrapper if the model added one."""
+    """Remove one outer fenced-code-block wrapper if the model added it."""
     match = _FENCE_EDGE_RE.match(value)
     body = match.group("body") if match else value
     # Some models emit a bare filename line ("custom_op.asc") as the first line.
     lines = body.split("\n")
-    if lines and re.fullmatch(r"\s*(custom_op\.asc|model_new\.py)\s*", lines[0]):
+    if lines and re.fullmatch(
+        r"\s*(custom_op\.asc|model_new\.py)\s*", lines[0]
+    ):
         body = "\n".join(lines[1:])
     return body
 
@@ -60,11 +62,14 @@ class AscendCGeneration(BaseModel):
     @field_validator("custom_op_asc", "model_new_py", mode="before")
     @classmethod
     def _strip_markdown_fence(cls, value: str) -> str:
+        """Drop an outer markdown fence or leading filename line."""
         return _strip_fence(value) if isinstance(value, str) else value
 
 
 @dataclass(frozen=True)
 class GenerationResult:
+    """One LLM response after structured or fenced-block extraction."""
+
     generation: AscendCGeneration
     raw_text: str
     model: str
@@ -80,13 +85,30 @@ STRUCTURED_OUTPUT_NOTE = (
     "and without markdown fences."
 )
 
+
+def _usage_dict(response: object) -> dict:
+    """Return ``response.usage`` as a dict, or ``{}`` when absent."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    dump = getattr(usage, "model_dump", None)
+    return dump() if callable(dump) else {}
+
+
 _MIN_ASC_KERNEL_MARKERS = ("__global__", "__vector__")
 _MIN_ASC_BINDING_MARKERS = ("TORCH_LIBRARY", "TORCH_LIBRARY_IMPL")
 _MIN_PY_MARKERS = ("class ModelNew", "torch.ops.custom_op")
 
 
 def validate_generation(gen: AscendCGeneration) -> list[str]:
-    """Sanity-check that the fields carry real file content."""
+    """Sanity-check that the fields carry real file content.
+
+    Args:
+        gen: Parsed deliverables.
+
+    Returns:
+        Human-readable problems; empty means the fields look complete.
+    """
     problems = []
     for marker in _MIN_ASC_KERNEL_MARKERS:
         if marker not in gen.custom_op_asc:
@@ -115,6 +137,16 @@ class LLMClient:
         max_tokens: int = 16384,
         timeout: float = 600.0,
     ) -> None:
+        """Create a client for one generation model.
+
+        Args:
+            model: Served model name passed to the OpenAI-compatible API.
+            base_url: Endpoint URL; defaults to ``OPENAI_BASE_URL``.
+            api_key: Credential; defaults to ``OPENAI_API_KEY``.
+            temperature: Sampling temperature.
+            max_tokens: Completion token budget.
+            timeout: Request timeout in seconds.
+        """
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -131,30 +163,36 @@ class LLMClient:
         system: str | None = None,
         max_retries: int = 1,
     ) -> GenerationResult:
-        """Generate one structured sample; parse with pydantic, fall back to fences.
+        """Generate one sample via structured parse, else fenced blocks.
 
         The response is validated for real file content; an invalid answer is
         retried once with an explicit correction reminder.
+
+        Args:
+            prompt: User prompt (the structured-output note is appended).
+            system: Optional system message.
+            max_retries: Extra attempts after the first failed parse or
+                validation. Default is one retry.
+
+        Returns:
+            Parsed deliverables plus the raw response text.
+
+        Raises:
+            ValueError: If every attempt fails validation or the endpoint
+                returns no usable fenced blocks.
         """
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt + STRUCTURED_OUTPUT_NOTE})
+        messages.append(
+            {"role": "user", "content": prompt + STRUCTURED_OUTPUT_NOTE}
+        )
 
         last_error: Exception | None = None
+        last_raw = ""
         for attempt in range(max_retries + 1):
             if attempt > 0:
-                if last_raw:
-                    messages.append({"role": "assistant", "content": last_raw})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Your previous answer did not contain the required file "
-                        "contents. Return the COMPLETE custom_op.asc source in "
-                        "`custom_op_asc` and the COMPLETE model_new.py source in "
-                        "`model_new_py` — full code, no placeholders."
-                    ),
-                })
+                _append_retry_turn(messages, last_raw)
             try:
                 result = self._generate_once(messages)
                 problems = validate_generation(result.generation)
@@ -168,38 +206,61 @@ class LLMClient:
         raise ValueError(f"generation failed validation: {last_error}")
 
     def _generate_once(self, messages: list[dict]) -> GenerationResult:
+        """Request one completion; fall back to fenced-block extraction."""
         try:
-            response = self.client.beta.chat.completions.parse(
-                model=self.model,
-                messages=messages,
-                response_format=AscendCGeneration,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-            parsed = response.choices[0].message.parsed
-            if parsed is None:
-                raise ValueError("structured parse returned None")
-            raw = response.choices[0].message.content or ""
-            usage = (
-                response.usage.model_dump() if response.usage else {}
-            )
-            return GenerationResult(parsed, raw, self.model, usage)
+            return self._parse_structured(messages)
         except Exception:
             # Endpoint may not support structured outputs: plain completion +
             # fenced-block extraction, validated by the same pydantic model.
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-            raw = response.choices[0].message.content or ""
-            usage = (
-                response.usage.model_dump() if response.usage else {}
-            )
-            return GenerationResult(
-                extract_generation(raw), raw, self.model, usage
-            )
+            return self._parse_fenced(messages)
+
+    def _parse_structured(self, messages: list[dict]) -> GenerationResult:
+        """Parse a structured-output response into the two deliverables."""
+        response = self.client.beta.chat.completions.parse(
+            model=self.model,
+            messages=messages,
+            response_format=AscendCGeneration,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        parsed = response.choices[0].message.parsed
+        if parsed is None:
+            raise ValueError("structured parse returned None")
+        return GenerationResult(
+            parsed,
+            response.choices[0].message.content or "",
+            self.model,
+            _usage_dict(response),
+        )
+
+    def _parse_fenced(self, messages: list[dict]) -> GenerationResult:
+        """Complete without a schema and extract fenced code blocks."""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        raw = response.choices[0].message.content or ""
+        return GenerationResult(
+            extract_generation(raw), raw, self.model, _usage_dict(response)
+        )
+
+
+_RETRY_REMINDER = (
+    "Your previous answer did not contain the "
+    "required file contents. Return the COMPLETE "
+    "custom_op.asc source in `custom_op_asc` and "
+    "the COMPLETE model_new.py source in "
+    "`model_new_py` — full code, no placeholders."
+)
+
+
+def _append_retry_turn(messages: list[dict], last_raw: str) -> None:
+    """Append the previous answer and a correction reminder."""
+    if last_raw:
+        messages.append({"role": "assistant", "content": last_raw})
+    messages.append({"role": "user", "content": _RETRY_REMINDER})
 
 
 _FENCE_RE = re.compile(
@@ -214,11 +275,34 @@ def extract_generation(text: str) -> AscendCGeneration:
     1. Blocks tagged with filenames (```custom_op.asc / ```model_new.py).
     2. A C++-tagged block (cpp/c++/asc) then a python-tagged block.
     3. The first two fenced blocks, Ascend C first.
+
+    Args:
+        text: Raw model response.
+
+    Returns:
+        Parsed ``custom_op_asc`` and ``model_new_py`` fields.
+
+    Raises:
+        ValueError: If no usable pair of fenced blocks is found.
     """
     blocks = list(_FENCE_RE.finditer(text))
     if not blocks:
         raise ValueError("no fenced code blocks found in model response")
+    asc_src, py_src = _pair_fenced_blocks(blocks)
+    if asc_src is None or py_src is None:
+        raise ValueError(
+            "could not identify custom_op.asc and model_new.py blocks"
+        )
+    return AscendCGeneration(custom_op_asc=asc_src, model_new_py=py_src)
 
+
+def _pair_fenced_blocks(
+    blocks: list[re.Match[str]],
+) -> tuple[str | None, str | None]:
+    """Pick Ascend C and Python bodies from fenced blocks.
+
+    Filename tags win, then language tags, then first-two-block order.
+    """
     asc_src: str | None = None
     py_src: str | None = None
     for block in blocks:
@@ -236,10 +320,8 @@ def extract_generation(text: str) -> AscendCGeneration:
                 asc_src = body
             elif py_src is None and tag in {"python", "py"}:
                 py_src = body
-    if asc_src is None and len(blocks) >= 1:
+    if asc_src is None and blocks:
         asc_src = blocks[0].group("body")
     if py_src is None and len(blocks) >= 2:
         py_src = blocks[1].group("body")
-    if asc_src is None or py_src is None:
-        raise ValueError("could not identify custom_op.asc and model_new.py blocks")
-    return AscendCGeneration(custom_op_asc=asc_src, model_new_py=py_src)
+    return asc_src, py_src

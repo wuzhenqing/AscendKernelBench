@@ -15,6 +15,9 @@ hero:
     - theme: alt
       text: View on GitHub
       link: https://github.com/wuzhenqing/AscendKernelBench
+    - theme: alt
+      text: Contributing
+      link: https://github.com/wuzhenqing/AscendKernelBench/blob/main/CONTRIBUTING.md
 features:
   - title: 270 reference tasks
     details: Four levels of vendored KernelBench tasks, from individual operators to complete models. Each task uses the same Python contract.
@@ -45,7 +48,8 @@ The input is a PyTorch reference `Model`. A language model produces two files:
 containing a compatible `ModelNew` wrapper. The evaluator checks that wrapper,
 builds a process-local `libcustom_op.so`, loads it in the PyTorch process, compares outputs, and measures eligible candidates against
 `torch_npu` eager execution. [Results and metrics](/guide/results) explains how
-`fast_p` and `pass@k` are calculated and which samples enter each denominator.
+`fast_p`, `pass@k`, and the optional roofline SOL score are calculated and which
+samples enter each denominator.
 
 The project implements generation, isolated sample evaluation, and analysis.
 It does not provide an automatic compile-error repair loop. A saved hardware

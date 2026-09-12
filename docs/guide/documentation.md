@@ -34,6 +34,11 @@ Check the home page, one long reference page, local search, the narrow-screen
 navigation, and light/dark appearance when changing the theme. Generated output
 in `docs/.vitepress/dist/` and the VitePress cache are ignored by Git.
 
+Python style and unit tests are a separate GitHub Actions workflow
+(`.github/workflows/quality.yml`). That job installs `.[dev]`, runs
+`pre-commit run --all-files`, and runs `pytest`. It does not compile
+Ascend C or require an NPU. See [CONTRIBUTING.md](https://github.com/wuzhenqing/AscendKernelBench/blob/main/CONTRIBUTING.md).
+
 ## Add or update a page
 
 1. Write an English Markdown page under `docs/guide/` or `docs/reference/`.

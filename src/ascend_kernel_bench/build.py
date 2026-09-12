@@ -10,6 +10,7 @@ JIT mode is reserved and rejected here until it is merged.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -38,6 +39,12 @@ def cann_env() -> dict[str, str]:
 
     Cached per process; the CANN env is stable for a machine. Set
     ``CANN_SET_ENV`` to override the set_env.sh location.
+
+    Returns:
+        A copy of ``os.environ`` merged with variables from ``set_env.sh``.
+
+    Raises:
+        BuildError: If the sourced script exits non-zero.
     """
     set_env = os.environ.get("CANN_SET_ENV", DEFAULT_CANN_SET_ENV)
     if not Path(set_env).is_file():
@@ -50,7 +57,9 @@ def cann_env() -> dict[str, str]:
         timeout=60,
     )
     if result.returncode != 0:
-        raise BuildError(f"Failed to source CANN env {set_env}: {result.stderr}")
+        raise BuildError(
+            f"Failed to source CANN env {set_env}: {result.stderr}"
+        )
     env = dict(os.environ)
     for line in result.stdout.splitlines():
         if "=" in line:
@@ -69,8 +78,19 @@ def build_custom_op(
 ) -> Path:
     """Write ``custom_op.asc`` into ``work_dir`` and build ``libcustom_op.so``.
 
-    Returns the path to the built shared library. Raises BuildError with
-    the compiler log on failure. Never runs ``cmake --install``.
+    Args:
+        asc_source: Generated Ascend C source.
+        work_dir: Sample directory that will hold sources and ``.so``.
+        cmake_arch: Value passed to ``CMAKE_ASC_ARCHITECTURES``.
+        timeout_s: Separate budget for configure and for build.
+        operator_mode: Must be an implemented mode (``aclnn``).
+
+    Returns:
+        Path to the process-local shared library.
+
+    Raises:
+        BuildError: If the mode is reserved, CMake fails, or no ``.so``
+            is produced. Never runs ``cmake --install``.
     """
     try:
         require_implemented_mode(operator_mode)
@@ -80,7 +100,9 @@ def build_custom_op(
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     (work_dir / "custom_op.asc").write_text(asc_source, encoding="utf-8")
-    shutil.copy(BUILD_TEMPLATE_DIR / "CMakeLists.txt", work_dir / "CMakeLists.txt")
+    shutil.copy(
+        BUILD_TEMPLATE_DIR / "CMakeLists.txt", work_dir / "CMakeLists.txt"
+    )
 
     build_dir = work_dir / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -99,21 +121,37 @@ def build_custom_op(
         # interpreter must be the one from the active environment.
         f"-DPython3_EXECUTABLE={sys.executable}",
     ]
-    if os.environ.get("AKB_ENABLE_CCACHE", "").strip().lower() in {"1", "true", "yes", "on"}:
+    if os.environ.get("AKB_ENABLE_CCACHE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         configure_cmd.append("-DENABLE_CCACHE=ON")
     build_cmd = ["cmake", "--build", str(build_dir), "-j"]
 
-    _run_checked("configure", configure_cmd, cwd=work_dir, env=env, timeout_s=timeout_s)
+    _run_checked(
+        "configure", configure_cmd, cwd=work_dir, env=env, timeout_s=timeout_s
+    )
     _run_checked("build", build_cmd, cwd=work_dir, env=env, timeout_s=timeout_s)
 
     return find_built_library(work_dir)
 
 
 def find_built_library(work_dir: Path) -> Path:
-    """Locate the process-local shared library written by the ACLNN CMake project.
+    """Locate the process-local shared library from the ACLNN CMake project.
 
     Prefers ``libcustom_op.so``. Also accepts a Python-extension-style
     ``custom_op*.so`` so older artifacts remain loadable.
+
+    Args:
+        work_dir: Sample directory passed to CMake.
+
+    Returns:
+        Path of the first acceptable shared library.
+
+    Raises:
+        BuildError: If no matching ``.so`` exists.
     """
     work_dir = Path(work_dir)
     preferred = work_dir / ACLNN_SHARED_LIBRARY_NAME
@@ -143,20 +181,37 @@ def _run_checked(
     env: dict[str, str],
     timeout_s: int,
 ) -> None:
+    """Run one CMake stage, persist the log, and raise on failure.
+
+    Args:
+        stage: Label used in the log filename (``configure`` / ``build``).
+        cmd: Command vector. ``cmake --install`` is rejected.
+        cwd: Working directory for the subprocess.
+        env: Environment, typically from :func:`cann_env`.
+        timeout_s: Subprocess timeout.
+
+    Raises:
+        BuildError: On timeout, forbidden install, or non-zero exit.
+    """
     if cmd[:2] == ["cmake", "--install"]:
-        raise BuildError("cmake --install is forbidden; operators stay process-local")
+        raise BuildError(
+            "cmake --install is forbidden; operators stay process-local"
+        )
     try:
         result = subprocess.run(
-            cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout_s
+            cmd,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
         raise BuildError(f"{stage} timed out after {timeout_s}s") from exc
     log = (result.stdout or "") + "\n" + (result.stderr or "")
     log_path = cwd / "build" / f"{stage}.log"
-    try:
+    with contextlib.suppress(OSError):
         log_path.write_text(log, encoding="utf-8")
-    except OSError:
-        pass
     if result.returncode != 0:
         tail = "\n".join(log.strip().splitlines()[-60:])
         raise BuildError(f"{stage} failed (see {log_path}):\n{tail}")

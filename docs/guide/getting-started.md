@@ -31,6 +31,37 @@ Run the commands in these guides from the repository root, with the environment 
 
 The base installation provides the Python dependencies for generation and reporting. It does not install PyTorch, `torch_npu`, CANN, the NPU driver, or the native build toolchain.
 
+For linting and unit tests, install the development extra and the pre-commit hooks:
+
+```bash
+python -m pip install -e ".[dev]"
+pre-commit install
+pre-commit run --all-files
+pytest
+```
+
+### Ascend host experiment environment
+
+On a Linux machine with CANN 9.1.0, use conda env `akb` (Python 3.12,
+PyTorch 2.10.0, torch-npu 2.10.0.post6):
+
+```bash
+conda env create -f environment.yml
+conda activate akb
+source /usr/local/Ascend/cann-9.1.0/set_env.sh
+python -m pip install -e ".[dev]"
+```
+
+Confirm the NPU is visible before evaluating:
+
+```bash
+python - <<'PY'
+import torch
+import torch_npu
+print(torch.__version__, torch_npu.__version__, torch.npu.is_available())
+PY
+```
+
 ## Explore tasks without an NPU
 
 Task discovery reads Python source and checks its top-level contract using the Python AST. It does not execute the task or import its PyTorch dependencies.

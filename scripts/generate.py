@@ -1,8 +1,9 @@
 #!/usr/bin/env python
-"""Batch generation: LLM generates n samples per task, saved to runs/{run_name}/.
+"""Batch generation: n samples per task, saved under runs/{run_name}/.
 
-Generation is decoupled from evaluation (docs/guide/workflows.md): samples land on disk
-and can be evaluated repeatedly, on this or another machine.
+Generation is decoupled from evaluation (docs/guide/workflows.md):
+samples land on disk and can be evaluated later, including on another
+machine.
 
 Example:
     python scripts/generate.py --level 1 --n-samples 2 --run-name dev_run
@@ -13,114 +14,125 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import datetime
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
+import _bootstrap  # noqa: F401
 from rich.console import Console
-from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from ascend_kernel_bench import rundir
-from ascend_kernel_bench.config import load_eval_config, load_hardware_profile
-from ascend_kernel_bench.dataset import discover_tasks, load_task
+from ascend_kernel_bench.cli_util import (
+    add_operator_mode_argument,
+    cli_progress,
+    generation_run_config,
+    load_eval_runtime,
+    resolve_generation_settings,
+    select_tasks,
+)
 from ascend_kernel_bench.llm import LLMClient
-from ascend_kernel_bench.modes import OPERATOR_MODES, OperatorModeError, require_implemented_mode
+from ascend_kernel_bench.modes import OperatorModeError
 from ascend_kernel_bench.prompt import SYSTEM_PROMPT, build_prompt
 
 console = Console()
 
 
 def main() -> None:
+    """Generate one or more samples per selected task."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--level", type=int, default=None)
-    parser.add_argument("--task", action="append", default=None,
-                        help="task id(s); overrides --level")
+    parser.add_argument(
+        "--task",
+        action="append",
+        default=None,
+        help="task id(s); overrides --level",
+    )
     parser.add_argument("--n-samples", type=int, default=None)
     parser.add_argument("--model", default=None)
     parser.add_argument("--hardware", default=None)
-    parser.add_argument("--prompt-mode", default=None,
-                        choices=["zero_shot", "one_shot", "few_shot"])
+    parser.add_argument(
+        "--prompt-mode",
+        default=None,
+        choices=["zero_shot", "one_shot", "few_shot"],
+    )
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--config", default=None)
-    parser.add_argument(
-        "--operator-mode",
-        default=None,
-        choices=list(OPERATOR_MODES),
-        help="aclnn (process-local shared library) or jit (not implemented yet)",
-    )
+    add_operator_mode_argument(parser)
     args = parser.parse_args()
 
-    config = load_eval_config(args.config)
-    hardware = load_hardware_profile(args.hardware or config.hardware)
-    gen_cfg = dict(config.generation)
-    model = args.model or gen_cfg.get("model", "deepseek-v4-flash")
-    n_samples = args.n_samples or int(gen_cfg.get("num_samples", 1))
-    prompt_mode = args.prompt_mode or gen_cfg.get("prompt_mode", "one_shot")
-    temperature = args.temperature
-    if temperature is None:
-        temperature = float(gen_cfg.get("temperature", 0.0))
-    max_tokens = int(gen_cfg.get("max_tokens", 16384))
     try:
-        operator_mode = require_implemented_mode(
-            args.operator_mode or config.operator_mode
+        runtime = load_eval_runtime(
+            config_path=args.config,
+            hardware=args.hardware,
+            operator_mode=args.operator_mode,
         )
     except OperatorModeError as exc:
         sys.exit(str(exc))
+    config, hardware = runtime.config, runtime.hardware
+    settings = resolve_generation_settings(
+        config,
+        model=args.model,
+        prompt_mode=args.prompt_mode,
+        temperature=args.temperature,
+        num_samples=args.n_samples,
+    )
+    operator_mode = config.operator_mode
 
-    if args.task:
-        tasks = [load_task(t) for t in args.task]
-    elif args.level is not None:
-        tasks = discover_tasks(level=args.level)
-    else:
-        tasks = discover_tasks()
+    tasks = select_tasks(level=args.level, task_ids=args.task)
     if not tasks:
         sys.exit("no tasks found")
 
     run_name = args.run_name or f"gen_{datetime.now():%Y%m%d_%H%M%S}"
-    run_dir = rundir.create_run(run_name, {
-        "model": model,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "prompt_mode": prompt_mode,
-        "num_samples": n_samples,
-        "hardware": hardware.name,
-        "operator_mode": operator_mode,
-        "tasks": [t.task_id for t in tasks],
-    })
-    console.print(f"run dir: {run_dir}  ({len(tasks)} tasks x {n_samples} samples)")
+    run_dir = rundir.create_run(
+        run_name,
+        generation_run_config(
+            settings,
+            hardware_name=hardware.name,
+            operator_mode=operator_mode,
+            task_ids=[task.task_id for task in tasks],
+        ),
+    )
+    console.print(
+        f"run dir: {run_dir}  "
+        f"({len(tasks)} tasks x {settings.num_samples} samples)"
+    )
 
-    client = LLMClient(model, temperature=temperature, max_tokens=max_tokens)
-    total = len(tasks) * n_samples
+    client = LLMClient(
+        settings.model,
+        temperature=settings.temperature,
+        max_tokens=settings.max_tokens,
+    )
+    total = len(tasks) * settings.num_samples
     failures = 0
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
+    with cli_progress(console) as progress:
         bar = progress.add_task("generating", total=total)
         for task in tasks:
             prompt = build_prompt(
-                task, hardware, mode=prompt_mode, operator_mode=operator_mode
+                task,
+                hardware,
+                mode=settings.prompt_mode,
+                operator_mode=operator_mode,
             )
-            for sample_id in range(n_samples):
+            for sample_id in range(settings.num_samples):
                 progress.update(bar, description=f"{task.task_id} s{sample_id}")
                 try:
                     result = client.generate(prompt, system=SYSTEM_PROMPT)
                     rundir.save_sample(
-                        run_dir, task.task_id, sample_id,
-                        prompt=prompt, generation=result.generation,
+                        run_dir,
+                        task.task_id,
+                        sample_id,
+                        prompt=prompt,
+                        generation=result.generation,
                         raw_response=result.raw_text,
                     )
                 except Exception as exc:
                     failures += 1
-                    console.print(f"[red]generate failed {task.task_id} "
-                                  f"sample {sample_id}: {exc}[/red]")
+                    console.print(
+                        f"[red]generate failed {task.task_id} "
+                        f"sample {sample_id}: {exc}[/red]"
+                    )
                 progress.advance(bar)
-    console.print(f"done: {total - failures}/{total} samples saved to {run_dir}")
+    console.print(
+        f"done: {total - failures}/{total} samples saved to {run_dir}"
+    )
     sys.exit(1 if failures == total else 0)
 
 

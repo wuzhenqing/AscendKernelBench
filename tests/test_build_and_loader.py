@@ -4,10 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from ascend_kernel_bench.build import BuildError, find_built_library, build_custom_op
+from ascend_kernel_bench._paths import BUILD_TEMPLATE_DIR
+from ascend_kernel_bench.build import (
+    BuildError,
+    build_custom_op,
+    find_built_library,
+)
 from ascend_kernel_bench.loader import LoadError, load_process_local_op
 from ascend_kernel_bench.modes import ACLNN_SHARED_LIBRARY_NAME
-from ascend_kernel_bench._paths import BUILD_TEMPLATE_DIR
 
 
 def test_cmake_template_is_process_local() -> None:
@@ -15,7 +19,9 @@ def test_cmake_template_is_process_local() -> None:
     assert "CMAKE_SKIP_INSTALL_RULES" in text
     assert "add_library(custom_op SHARED" in text
     assert "npu_op_package(" not in text
-    assert "custom_opp_*" in text  # mentioned only as something we do not produce
+    assert (
+        "custom_opp_*" in text
+    )  # mentioned only as something we do not produce
     assert "BUILD_RPATH" in text
     assert "libcustom_op" in text or 'OUTPUT_NAME "custom_op"' in text
     assert "CMAKE_ASC_ARCHITECTURES" in text
@@ -38,7 +44,9 @@ def test_find_built_library_missing(tmp_path: Path) -> None:
 
 def test_build_rejects_jit(tmp_path: Path) -> None:
     with pytest.raises(BuildError, match="not implemented"):
-        build_custom_op("source", tmp_path, cmake_arch="dav-2201", operator_mode="jit")
+        build_custom_op(
+            "source", tmp_path, cmake_arch="dav-2201", operator_mode="jit"
+        )
 
 
 def test_loader_requires_binding(tmp_path: Path) -> None:

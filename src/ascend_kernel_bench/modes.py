@@ -30,8 +30,20 @@ class OperatorModeError(ValueError):
 
 
 def normalize_operator_mode(mode: str | None) -> str:
-    """Return a canonical mode name or raise :class:`OperatorModeError`."""
-    resolved = DEFAULT_OPERATOR_MODE if mode is None else str(mode).strip().lower()
+    """Return a canonical mode name or raise :class:`OperatorModeError`.
+
+    Args:
+        mode: User or config value. ``None`` selects the default.
+
+    Returns:
+        ``aclnn`` or ``jit``.
+
+    Raises:
+        OperatorModeError: If ``mode`` is not a known name.
+    """
+    resolved = (
+        DEFAULT_OPERATOR_MODE if mode is None else str(mode).strip().lower()
+    )
     if resolved not in OPERATOR_MODES:
         raise OperatorModeError(
             f"Unknown operator_mode {mode!r}; expected one of {OPERATOR_MODES}"
@@ -40,7 +52,17 @@ def normalize_operator_mode(mode: str | None) -> str:
 
 
 def require_implemented_mode(mode: str | None) -> str:
-    """Validate ``mode`` and reject the reserved JIT path."""
+    """Validate ``mode`` and reject the reserved JIT path.
+
+    Args:
+        mode: User or config value. ``None`` selects the default.
+
+    Returns:
+        The implemented mode name (currently only ``aclnn``).
+
+    Raises:
+        OperatorModeError: If the mode is unknown or still reserved.
+    """
     resolved = normalize_operator_mode(mode)
     if resolved == JIT_MODE:
         raise OperatorModeError(

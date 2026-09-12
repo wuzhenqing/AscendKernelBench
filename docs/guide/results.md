@@ -72,9 +72,22 @@ The following is an illustrative schema example, **not a measured result**:
         "correctness_passed": 5,
         "atol": 0.0001,
         "rtol": 0.0001,
+        "seed": 42,
+        "num_warmup": 10,
+        "num_perf_trials": 100,
+        "l2_clear_size": 402653184,
         "timing_fresh_inputs": true,
         "speedup": 1.5,
-        "excessive_speedup": false
+        "excessive_speedup": false,
+        "bytes_moved": 8388608,
+        "sol_bound_ms": 0.00524,
+        "sol_bound_kind": "roofline_memory",
+        "sol_score": 0.51,
+        "torch_version": "2.10.0",
+        "torch_npu_version": "2.10.0.post6",
+        "cann_version": "9.1.0",
+        "device": "npu:0",
+        "device_name": "Ascend910B2"
       }
     }
   ]
@@ -92,7 +105,7 @@ The following is an illustrative schema example, **not a measured result**:
 | `ref_runtime_stats` | NPU reference timing statistics, or `null`. |
 | `metadata` | Stage-specific settings, diagnostics, and flags. Keys vary by execution path. |
 
-Common diagnostic metadata includes `static_check_error` (a list), `compilation_error`, `runtime_error`, `correctness_error`, and `reference_npu_error`. A successful correctness path also records hardware/profile name, precision, reference mode, tolerances, and trial counts. Early failures do not necessarily contain those contextual fields.
+Common diagnostic metadata includes `static_check_error` (a list), `compilation_error`, `runtime_error`, `correctness_error`, and `reference_npu_error`. A successful correctness path also records a protocol snapshot (hardware, precision, seed, trial counts, warmup, L2 flush size, tolerances, operator mode), the reference mode, and the software stack (`torch_version`, `torch_npu_version`, `device`, and when available `device_name`, `cann_version`, `ascend_home`). Timed NPU-reference samples may also record `bytes_moved`, `sol_bound_ms`, `sol_bound_kind`, and `sol_score`. Early failures do not necessarily contain those contextual fields.
 
 `max_difference` is a limited diagnostic: it is updated for mismatched top-level tensor outputs of equal shape when a numeric difference can be calculated. It is not a complete maximum-error statistic across every output or successful trial. A value of zero does not prove bitwise equality.
 
@@ -146,6 +159,19 @@ Consequently, report the requested task/sample counts alongside the evaluated co
 `geometric_mean_speedup_correct_only` is the geometric mean of available speedups over correct, unflagged samples. It excludes failures, untimed samples, and CPU-reference samples. It returns `0.0` when no eligible speedups exist.
 
 Because this metric is conditioned on a selected subset of samples, always report it with correctness and coverage. A higher geometric mean on a smaller passing subset is not sufficient evidence of a stronger overall result.
+
+## Roofline SOL score
+
+When a sample has a candidate mean, an NPU-reference mean, and a positive profile `memory_bandwidth_gbps`, the evaluator records:
+
+```text
+T_sol = bytes_moved / bandwidth
+S = (T_b - T_sol) / ((T_k - T_sol) + (T_b - T_sol))
+```
+
+`bytes_moved` is the sum of top-level input and last-trial output tensor sizes. It is not a full DRAM-traffic model. When a task declares a positive top-level `FLOPS` or `NUM_FLOPS` constant **and** the hardware profile has `peak_tflops` for the active precision, the bound becomes `max(memory, compute)` and `sol_bound_kind` is `roofline`. The vendored KernelBench corpus does not declare FLOPs, so published scores use the memory term only. `S = 0.5` matches the software baseline; `S` approaches `1` as the kernel approaches the bound. `analyze.py` reports `mean_sol_score` over samples that recorded a score. This is a reporting aid after NVIDIA SOL-ExecBench, not a claim that the machine was characterized with SOLAR. Do not compare these numbers to CUDA SOL-ExecBench leaderboards.
+
+`summarize_eval_results` also counts `cpu_reference`, `npu_reference`, and `excessive_speedup` samples so a report can show coverage next to `fast_p`.
 
 ## pass@k
 
