@@ -52,8 +52,7 @@ def resolve_generation_settings(
     gen_cfg = dict(config.generation)
     return GenerationSettings(
         model=model or str(gen_cfg.get("model", "deepseek-v4-flash")),
-        prompt_mode=prompt_mode
-        or str(gen_cfg.get("prompt_mode", "one_shot")),
+        prompt_mode=prompt_mode or str(gen_cfg.get("prompt_mode", "one_shot")),
         temperature=float(
             gen_cfg.get("temperature", 0.0)
             if temperature is None

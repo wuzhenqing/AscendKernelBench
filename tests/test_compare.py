@@ -68,7 +68,9 @@ def test_move_value_to_device_casts_only_floats() -> None:
     ints = torch.tensor([1, 2], dtype=torch.int32)
     moved = move_value_to_device(floats, device, torch.float32)
     assert moved.dtype == torch.float32
-    assert move_value_to_device(ints, device, torch.float32).dtype == torch.int32
+    assert (
+        move_value_to_device(ints, device, torch.float32).dtype == torch.int32
+    )
     assert move_value_to_device(3, device, torch.float32) == 3
 
 

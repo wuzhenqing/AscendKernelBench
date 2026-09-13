@@ -8,6 +8,7 @@ SOLAR characterization of the machine.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 from typing import Any
@@ -65,7 +66,9 @@ def cann_runtime_facts() -> dict[str, str]:
         environment variables produce an empty mapping rather than an error.
     """
     facts: dict[str, str] = {}
-    explicit = os.environ.get("ASCEND_VERSION") or os.environ.get("CANN_VERSION")
+    explicit = os.environ.get("ASCEND_VERSION") or os.environ.get(
+        "CANN_VERSION"
+    )
     if explicit:
         facts["cann_version"] = explicit.strip()
     home = os.environ.get("ASCEND_HOME_PATH") or os.environ.get(
@@ -104,10 +107,8 @@ def npu_runtime_metadata(device: str) -> dict[str, Any]:
         return metadata
     metadata["torch_version"] = torch.__version__
     metadata["torch_npu_version"] = getattr(torch_npu, "__version__", "unknown")
-    try:
+    with contextlib.suppress(Exception):
         metadata["device_name"] = torch.npu.get_device_name(
             npu_device_index(device)
         )
-    except Exception:
-        pass
     return metadata

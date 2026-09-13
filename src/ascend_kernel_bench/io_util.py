@@ -103,9 +103,7 @@ def write_json_atomic(path: Path, payload: Any) -> None:
         path: Destination path. Missing parents are created.
         payload: Any JSON-serializable object.
     """
-    _write_text_atomic(
-        path, json.dumps(payload, indent=2, ensure_ascii=False)
-    )
+    _write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def write_yaml_atomic(path: Path, payload: Any) -> None:
