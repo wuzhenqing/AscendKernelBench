@@ -10,7 +10,6 @@ from typing import Any
 import yaml
 
 from ._paths import EVAL_DEFAULT_CONFIG, HARDWARE_DIR
-from .modes import DEFAULT_OPERATOR_MODE, require_implemented_mode
 
 
 @dataclass(frozen=True)
@@ -97,7 +96,6 @@ class EvalConfig:
     excessive_speedup: float = 10.0
     build_timeout: int = 600
     eval_timeout: int = 300
-    operator_mode: str = DEFAULT_OPERATOR_MODE
     generation: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -109,16 +107,9 @@ class EvalConfig:
 
         Returns:
             An immutable :class:`EvalConfig`.
-
-        Raises:
-            OperatorModeError: If ``operator_mode`` is unknown or JIT.
         """
         known = set(cls.__dataclass_fields__)
         filtered = {key: value for key, value in data.items() if key in known}
-        if "operator_mode" in filtered:
-            filtered["operator_mode"] = require_implemented_mode(
-                filtered["operator_mode"]
-            )
         return cls(**filtered)
 
 

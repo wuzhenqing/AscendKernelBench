@@ -18,7 +18,6 @@ from rich.panel import Panel
 from ascend_kernel_bench import rundir
 from ascend_kernel_bench.cli_util import (
     GenerationSettings,
-    add_operator_mode_argument,
     eval_result_lines,
     generation_run_config,
     load_eval_runtime,
@@ -28,7 +27,6 @@ from ascend_kernel_bench.config import EvalConfig, HardwareProfile
 from ascend_kernel_bench.dataset import Task, load_task
 from ascend_kernel_bench.eval import eval_sample
 from ascend_kernel_bench.llm import LLMClient
-from ascend_kernel_bench.modes import OperatorModeError
 from ascend_kernel_bench.prompt import SYSTEM_PROMPT, build_prompt
 
 console = Console()
@@ -59,7 +57,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--no-perf", action="store_true", help="skip timing")
     parser.add_argument("--config", default=None, help="eval config yaml")
-    add_operator_mode_argument(parser)
     return parser
 
 
@@ -67,7 +64,6 @@ def _generate_sample(
     task: Task,
     hardware: HardwareProfile,
     settings: GenerationSettings,
-    operator_mode: str,
     run_dir: Path,
     sample_id: int,
 ) -> Path:
@@ -76,7 +72,6 @@ def _generate_sample(
         task,
         hardware,
         mode=settings.prompt_mode,
-        operator_mode=operator_mode,
     )
     console.print(
         f"prompt: {len(prompt)} chars, mode={settings.prompt_mode}, "
@@ -138,14 +133,10 @@ def main() -> None:
     """Generate and evaluate a single task end to end."""
     args = _build_parser().parse_args()
 
-    try:
-        runtime = load_eval_runtime(
-            config_path=args.config,
-            hardware=args.hardware,
-            operator_mode=args.operator_mode,
-        )
-    except OperatorModeError as exc:
-        sys.exit(str(exc))
+    runtime = load_eval_runtime(
+        config_path=args.config,
+        hardware=args.hardware,
+    )
     config, hardware = runtime.config, runtime.hardware
     settings = resolve_generation_settings(
         config,
@@ -153,7 +144,6 @@ def main() -> None:
         prompt_mode=args.prompt_mode,
         temperature=args.temperature,
     )
-    operator_mode = config.operator_mode
 
     task = load_task(args.task)
     run_name = args.run_name or f"single_{task.name}"
@@ -162,7 +152,6 @@ def main() -> None:
         generation_run_config(
             settings,
             hardware_name=hardware.name,
-            operator_mode=operator_mode,
             task_ids=[task.task_id],
             device=args.device,
         ),
@@ -173,7 +162,6 @@ def main() -> None:
         task,
         hardware,
         settings,
-        operator_mode,
         run_dir,
         args.sample_id,
     )

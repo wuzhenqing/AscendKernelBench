@@ -1,11 +1,8 @@
-"""Build LLM-generated Ascend C sources as a process-local shared library.
+"""Build and load a process-local ``libcustom_op.so``.
 
-ACLNN mode (the only implemented mode) copies ``build_template/CMakeLists.txt``
-into the sample work directory, injects ``CMAKE_ASC_ARCHITECTURES``, and
-produces ``libcustom_op.so`` in that directory. The evaluator then loads the
-library in the PyTorch process. Nothing is installed globally.
-
-JIT mode is reserved and rejected here until it is merged.
+Writes ``custom_op.asc`` into the sample directory, compiles it with the
+fixed CMake template, and loads the resulting shared library with
+``torch.ops.load_library``. Nothing is installed globally.
 """
 
 from __future__ import annotations
@@ -19,13 +16,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from ._paths import BUILD_TEMPLATE_DIR
-from .modes import (
-    ACLNN_MODE,
-    ACLNN_SHARED_LIBRARY_NAME,
-    OperatorModeError,
-    require_implemented_mode,
-)
 
+SHARED_LIBRARY_NAME = "libcustom_op.so"
 DEFAULT_CANN_SET_ENV = "/usr/local/Ascend/cann-9.1.0/set_env.sh"
 
 
@@ -33,22 +25,19 @@ class BuildError(RuntimeError):
     """Raised when configure or build fails; message carries compiler output."""
 
 
+class LoadError(RuntimeError):
+    """Raised when the sample-local shared library cannot be loaded."""
+
+
 @lru_cache(maxsize=1)
 def cann_env() -> dict[str, str]:
     """Capture the environment produced by sourcing CANN's set_env.sh.
 
-    Cached per process; the CANN env is stable for a machine. Set
-    ``CANN_SET_ENV`` to override the set_env.sh location.
-
-    Returns:
-        A copy of ``os.environ`` merged with variables from ``set_env.sh``.
-
-    Raises:
-        BuildError: If the sourced script exits non-zero.
+    Cached per process. Set ``CANN_SET_ENV`` to override the script path.
+    If that file is missing, the current environment is used as-is.
     """
     set_env = os.environ.get("CANN_SET_ENV", DEFAULT_CANN_SET_ENV)
     if not Path(set_env).is_file():
-        # Fall back to the current environment (already inside a sourced shell).
         return dict(os.environ)
     result = subprocess.run(
         ["bash", "-c", f'source "{set_env}" >/dev/null 2>&1 && env'],
@@ -74,7 +63,6 @@ def build_custom_op(
     *,
     cmake_arch: str,
     timeout_s: int = 600,
-    operator_mode: str = ACLNN_MODE,
 ) -> Path:
     """Write ``custom_op.asc`` into ``work_dir`` and build ``libcustom_op.so``.
 
@@ -83,20 +71,13 @@ def build_custom_op(
         work_dir: Sample directory that will hold sources and ``.so``.
         cmake_arch: Value passed to ``CMAKE_ASC_ARCHITECTURES``.
         timeout_s: Separate budget for configure and for build.
-        operator_mode: Must be an implemented mode (``aclnn``).
 
     Returns:
         Path to the process-local shared library.
 
     Raises:
-        BuildError: If the mode is reserved, CMake fails, or no ``.so``
-            is produced. Never runs ``cmake --install``.
+        BuildError: If CMake fails or no ``.so`` is produced.
     """
-    try:
-        require_implemented_mode(operator_mode)
-    except OperatorModeError as exc:
-        raise BuildError(str(exc)) from exc
-
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     (work_dir / "custom_op.asc").write_text(asc_source, encoding="utf-8")
@@ -117,8 +98,6 @@ def build_custom_op(
         str(build_dir),
         f"-DCMAKE_ASC_ARCHITECTURES={cmake_arch}",
         f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={work_dir}",
-        # Torch and torch_npu are located via Python introspection, so the
-        # interpreter must be the one from the active environment.
         f"-DPython3_EXECUTABLE={sys.executable}",
     ]
     if os.environ.get("AKB_ENABLE_CCACHE", "").strip().lower() in {
@@ -128,52 +107,69 @@ def build_custom_op(
         "on",
     }:
         configure_cmd.append("-DENABLE_CCACHE=ON")
-    build_cmd = ["cmake", "--build", str(build_dir), "-j"]
 
-    _run_checked(
+    _run_cmake(
         "configure", configure_cmd, cwd=work_dir, env=env, timeout_s=timeout_s
     )
-    _run_checked("build", build_cmd, cwd=work_dir, env=env, timeout_s=timeout_s)
-
+    _run_cmake(
+        "build",
+        ["cmake", "--build", str(build_dir), "-j"],
+        cwd=work_dir,
+        env=env,
+        timeout_s=timeout_s,
+    )
     return find_built_library(work_dir)
 
 
 def find_built_library(work_dir: Path) -> Path:
-    """Locate the process-local shared library from the ACLNN CMake project.
-
-    Prefers ``libcustom_op.so``. Also accepts a Python-extension-style
-    ``custom_op*.so`` so older artifacts remain loadable.
-
-    Args:
-        work_dir: Sample directory passed to CMake.
-
-    Returns:
-        Path of the first acceptable shared library.
-
-    Raises:
-        BuildError: If no matching ``.so`` exists.
-    """
+    """Return ``libcustom_op.so`` from ``work_dir`` or ``work_dir/build``."""
     work_dir = Path(work_dir)
-    preferred = work_dir / ACLNN_SHARED_LIBRARY_NAME
-    if preferred.is_file():
-        return preferred
-    candidates = sorted(
-        p
-        for p in work_dir.glob("custom_op*.so")
-        if p.is_file() and p.name != ACLNN_SHARED_LIBRARY_NAME
-    )
-    if candidates:
-        return candidates[0]
-    nested = work_dir / "build" / ACLNN_SHARED_LIBRARY_NAME
-    if nested.is_file():
-        return nested
+    for candidate in (
+        work_dir / SHARED_LIBRARY_NAME,
+        work_dir / "build" / SHARED_LIBRARY_NAME,
+    ):
+        if candidate.is_file():
+            return candidate
     raise BuildError(
         f"Built shared library not found in {work_dir} "
-        f"(expected {ACLNN_SHARED_LIBRARY_NAME})"
+        f"(expected {SHARED_LIBRARY_NAME})"
     )
 
 
-def _run_checked(
+def load_custom_op(so_path: Path, source: str = "") -> None:
+    """Load ``so_path`` so ``torch.ops.custom_op.*`` becomes callable.
+
+    Args:
+        so_path: Process-local ``libcustom_op.so``.
+        source: Optional ``custom_op.asc`` text used for a fast marker check.
+
+    Raises:
+        LoadError: If the file is missing, lacks ``TORCH_LIBRARY``, or
+            ``torch.ops.load_library`` fails.
+    """
+    so_path = Path(so_path).resolve()
+    if not so_path.is_file():
+        raise LoadError(f"shared library not found: {so_path}")
+    if source and "TORCH_LIBRARY" not in source:
+        raise LoadError(
+            f"{so_path.name} is missing TORCH_LIBRARY; the evaluator loads "
+            "operators with torch.ops.load_library only"
+        )
+    try:
+        import torch
+    except ImportError as exc:
+        raise LoadError(
+            "torch is required to load a TORCH_LIBRARY operator"
+        ) from exc
+    try:
+        torch.ops.load_library(str(so_path))
+    except Exception as exc:
+        raise LoadError(
+            f"torch.ops.load_library({so_path}) failed: {exc!r}"
+        ) from exc
+
+
+def _run_cmake(
     stage: str,
     cmd: list[str],
     *,
@@ -181,22 +177,7 @@ def _run_checked(
     env: dict[str, str],
     timeout_s: int,
 ) -> None:
-    """Run one CMake stage, persist the log, and raise on failure.
-
-    Args:
-        stage: Label used in the log filename (``configure`` / ``build``).
-        cmd: Command vector. ``cmake --install`` is rejected.
-        cwd: Working directory for the subprocess.
-        env: Environment, typically from :func:`cann_env`.
-        timeout_s: Subprocess timeout.
-
-    Raises:
-        BuildError: On timeout, forbidden install, or non-zero exit.
-    """
-    if cmd[:2] == ["cmake", "--install"]:
-        raise BuildError(
-            "cmake --install is forbidden; operators stay process-local"
-        )
+    """Run one CMake stage, persist the log, and raise on failure."""
     try:
         result = subprocess.run(
             cmd,

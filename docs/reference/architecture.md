@@ -37,13 +37,10 @@ KernelBench task + hardware profile
 | `llm.py` | Endpoint requests, structured/fenced response handling, and basic deliverable validation. |
 | `rundir.py` | Run paths, generated files, per-sample collection, and atomic aggregate writes. |
 | `checker.py` | Heuristic Python AST/pattern checks and Ascend C source checks. |
-| `eval.py` | Host orchestration: static check, worker subprocess, result persistence. |
+| `eval.py` | Host orchestration (static check, worker subprocess) and the worker entry point. |
 | `eval_device.py` | Worker-side build, seeded correctness, NPU-event timing, and SOL attach. |
 | `eval_result.py` | KernelBench-compatible result payloads and protocol-snapshot metadata. |
-| `worker.py` | JSON-config subprocess entry point and result-file output. |
-| `modes.py` | Operator-mode names: `aclnn` (implemented) and `jit` (reserved). |
-| `build.py` and `build_template/` | CANN environment capture and the ACLNN CMake project that writes `libcustom_op.so`. |
-| `loader.py` | `torch.ops.load_library` of that sample-local shared library (never a global install). |
+| `build.py` and `build_template/` | CMake build of `libcustom_op.so` and `torch.ops.load_library`. |
 | `timing.py` | NPU events, L2 flush sized from the hardware profile, and timing statistics. |
 | `compare.py` | Dtype-aware output matching and tensor-byte accounting. |
 | `sol.py` | Roofline bound and SOL-ExecBench-style score. |
@@ -87,13 +84,13 @@ These checks establish that response fields resemble the expected files; they do
 
 ## Evaluation boundary
 
-The host (`eval.py`) reads sample source and runs static checks before launching `python -m ascend_kernel_bench.worker`. A temporary config JSON carries the task source, sample path, profile architecture, and resolved evaluation settings into the worker. The worker calls `eval_device.eval_sample_on_device` and writes a JSON result file back.
+The host (`eval.py`) reads sample source and runs static checks before launching `python -m ascend_kernel_bench.eval`. A temporary config JSON carries the task source, sample path, profile architecture, and resolved evaluation settings into the worker. The worker calls `eval_device.eval_sample_on_device` and writes a JSON result file back.
 
 NPU imports live inside worker/timing functions so source inspection and host-side utilities do not initialize an NPU runtime. The worker loads generated code, compiles native code, and uses the selected NPU. Its process is separate but has the invoking user's privileges; this is not a security sandbox.
 
 Build configuration is controlled by the repository template. The generated `.asc` file supplies kernel logic, host launch wrappers, and a `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL` binding. The template builds a **process-local** `libcustom_op.so` with RPATH to Torch, `torch_npu`, and CANN libraries. It does not run `cmake --install`, does not produce a `custom_opp_*.run` package, and does not write into site-packages or `$ASCEND_OPP_PATH/vendors`. The worker loads that `.so` with `torch.ops.load_library` so `torch.ops.custom_op` is available. Hardware profile architecture selection is an input to compilation, not runtime hardware verification.
 
-Two operator modes are defined. `aclnn` is the path above. `jit` is reserved for a future KernelBench-style in-process compile and is rejected until it is merged.
+Build and evaluation always compile `custom_op.asc` with the CMake template and load `libcustom_op.so`. There is no second compilation path.
 
 The [evaluation guide](../guide/evaluation.md) documents seeded initialization, tolerance rules, CPU-reference fallback, timeout accounting, and event timing. The [task authoring guide](../task_authoring.md) describes both reference and candidate contracts.
 

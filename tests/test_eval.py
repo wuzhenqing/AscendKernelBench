@@ -38,7 +38,6 @@ def test_eval_protocol_metadata_snapshot() -> None:
         num_correct_trials=5,
         num_warmup=10,
         num_perf_trials=100,
-        operator_mode="aclnn",
         l2_clear_size=384 * 1024 * 1024,
         atol=1e-4,
         rtol=1e-4,

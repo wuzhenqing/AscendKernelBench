@@ -22,7 +22,6 @@ def test_aclnn_prompt_forbids_opp_install() -> None:
         load_task("level1/19_ReLU"),
         load_hardware_profile("ascend910b2"),
         mode="one_shot",
-        operator_mode="aclnn",
     )
     assert "libcustom_op.so" in prompt
     assert "custom_opp" in prompt

@@ -1,12 +1,6 @@
 """Shared CLI helpers."""
 
-from argparse import ArgumentParser
-
-import pytest
-
 from ascend_kernel_bench.cli_util import (
-    add_operator_mode_argument,
-    apply_operator_mode,
     cli_progress,
     eval_result_lines,
     generation_run_config,
@@ -16,24 +10,6 @@ from ascend_kernel_bench.cli_util import (
     select_tasks,
 )
 from ascend_kernel_bench.config import EvalConfig
-from ascend_kernel_bench.modes import OperatorModeError
-
-
-def test_apply_operator_mode_default() -> None:
-    config = apply_operator_mode(EvalConfig(), None)
-    assert config.operator_mode == "aclnn"
-
-
-def test_apply_operator_mode_rejects_jit() -> None:
-    with pytest.raises(OperatorModeError, match="not implemented"):
-        apply_operator_mode(EvalConfig(), "jit")
-
-
-def test_operator_mode_argument_choices() -> None:
-    parser = ArgumentParser()
-    add_operator_mode_argument(parser)
-    args = parser.parse_args(["--operator-mode", "aclnn"])
-    assert args.operator_mode == "aclnn"
 
 
 def test_resolve_generation_settings_overrides() -> None:
@@ -63,7 +39,7 @@ def test_resolve_generation_settings_overrides() -> None:
 
 def test_load_eval_runtime_defaults() -> None:
     runtime = load_eval_runtime()
-    assert runtime.config.operator_mode == "aclnn"
+    assert runtime.config.hardware == "ascend910b2"
     assert runtime.hardware.name == "ascend910b2"
 
 
@@ -86,7 +62,6 @@ def test_generation_run_config_includes_extra_keys() -> None:
     record = generation_run_config(
         settings,
         hardware_name="ascend910b2",
-        operator_mode="aclnn",
         task_ids=["level1/19_ReLU"],
         device="npu:0",
     )

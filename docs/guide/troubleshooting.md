@@ -35,7 +35,7 @@ Use the project's active Python environment and an editable installation from th
 python -m pip install -e .
 ```
 
-The scripts add `src/` to their own import path, but an evaluation worker starts a new interpreter with `python -m ascend_kernel_bench.worker`. It therefore needs an installed package or an explicitly configured `PYTHONPATH`; the parent script's temporary `sys.path` change is not enough.
+The scripts add `src/` to their own import path, but an evaluation worker starts a new interpreter with `python -m ascend_kernel_bench.eval`. It therefore needs an installed package or an explicitly configured `PYTHONPATH`; the parent script's temporary `sys.path` change is not enough.
 
 ### Missing `torch` or `torch_npu`
 
@@ -105,7 +105,7 @@ export CANN_SET_ENV='/absolute/path/to/cann/set_env.sh'
 
 If that file does not exist, the helper silently uses the current environment. Confirm the path or start from a correctly initialized CANN shell. The helper caches the sourced environment per Python process, so restart after changing toolchain settings. Its environment setup applies to build subprocesses; the evaluation Python process must already be able to import and use the Ascend runtime.
 
-The ACLNN CMake project requires CMake, the ASC toolchain, a suitable GCC toolchain, Python development files, PyTorch, and `torch_npu`. `Failed to locate libgcc.a` or `Failed to derive GCC toolchain root` points to compiler discovery; a missing header or library is usually clearer in `build/configure.log` or `build/build.log` than in the truncated result message. A request for `operator_mode=jit` fails before compilation: that mode is not implemented yet.
+The ACLNN CMake project requires CMake, the ASC toolchain, a suitable GCC toolchain, Python development files, PyTorch, and `torch_npu`. `Failed to locate libgcc.a` or `Failed to derive GCC toolchain root` points to compiler discovery; a missing header or library is usually clearer in `build/configure.log` or `build/build.log` than in the truncated result message.
 
 ### `configure failed`, `build failed`, or no built module
 

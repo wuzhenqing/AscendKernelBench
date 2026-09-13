@@ -20,7 +20,6 @@ from rich.console import Console
 
 from ascend_kernel_bench import rundir
 from ascend_kernel_bench.cli_util import (
-    add_operator_mode_argument,
     cli_progress,
     generation_run_config,
     load_eval_runtime,
@@ -28,7 +27,6 @@ from ascend_kernel_bench.cli_util import (
     select_tasks,
 )
 from ascend_kernel_bench.llm import LLMClient
-from ascend_kernel_bench.modes import OperatorModeError
 from ascend_kernel_bench.prompt import SYSTEM_PROMPT, build_prompt
 
 console = Console()
@@ -55,17 +53,12 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--config", default=None)
-    add_operator_mode_argument(parser)
     args = parser.parse_args()
 
-    try:
-        runtime = load_eval_runtime(
-            config_path=args.config,
-            hardware=args.hardware,
-            operator_mode=args.operator_mode,
-        )
-    except OperatorModeError as exc:
-        sys.exit(str(exc))
+    runtime = load_eval_runtime(
+        config_path=args.config,
+        hardware=args.hardware,
+    )
     config, hardware = runtime.config, runtime.hardware
     settings = resolve_generation_settings(
         config,
@@ -74,7 +67,6 @@ def main() -> None:
         temperature=args.temperature,
         num_samples=args.n_samples,
     )
-    operator_mode = config.operator_mode
 
     tasks = select_tasks(level=args.level, task_ids=args.task)
     if not tasks:
@@ -86,7 +78,6 @@ def main() -> None:
         generation_run_config(
             settings,
             hardware_name=hardware.name,
-            operator_mode=operator_mode,
             task_ids=[task.task_id for task in tasks],
         ),
     )
@@ -109,7 +100,6 @@ def main() -> None:
                 task,
                 hardware,
                 mode=settings.prompt_mode,
-                operator_mode=operator_mode,
             )
             for sample_id in range(settings.num_samples):
                 progress.update(bar, description=f"{task.task_id} s{sample_id}")

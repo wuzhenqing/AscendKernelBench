@@ -6,16 +6,11 @@ orchestration lives in ``eval.py``; the NPU worker body lives in
 ``eval_device.py``. See docs/reference/architecture.md.
 """
 
-from .modes import ACLNN_MODE, DEFAULT_OPERATOR_MODE, JIT_MODE, OPERATOR_MODES
 from .score import compute_pass_at_k, fast_p, summarize_eval_results
 from .sol import mean_sol_score, sol_score
 
 __version__ = "0.1.0"
 __all__ = [
-    "ACLNN_MODE",
-    "DEFAULT_OPERATOR_MODE",
-    "JIT_MODE",
-    "OPERATOR_MODES",
     "compute_pass_at_k",
     "fast_p",
     "mean_sol_score",

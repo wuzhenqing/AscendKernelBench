@@ -25,11 +25,6 @@ excessive_speedup: 10.0
 build_timeout: 600
 eval_timeout: 300
 
-# Operator compilation mode. `aclnn` builds a process-local libcustom_op.so
-# and loads it in the evaluating PyTorch process (never installed globally).
-# `jit` is reserved and not implemented yet.
-operator_mode: aclnn
-
 # Generation defaults
 generation:
   model: deepseek-v4-flash

@@ -38,7 +38,6 @@ Use `--config path/to/eval.yaml` for a different configuration. The default valu
 | `excessive_speedup` | `10.0` | Speedups strictly above this value are flagged for review. |
 | `build_timeout` | `600` seconds | Separate budget for CMake configure and CMake build. |
 | `eval_timeout` | `300` seconds | Additional time included in the overall worker budget. |
-| `operator_mode` | `aclnn` | Process-local shared library. `jit` is reserved and not implemented. |
 
 The batch evaluator visits every complete sample directory sequentially and re-evaluates existing samples; it has no resume/skip flag. Re-evaluation overwrites each `eval_result.json` and rebuilds aggregate files. Preserve a copy of a run before measuring it on another device or with different settings.
 
@@ -46,7 +45,7 @@ The batch evaluator visits every complete sample directory sequentially and re-e
 
 For each sample, the host checks that `custom_op.asc` and `model_new.py` exist and applies the [candidate static checks](../task_authoring.md#candidate-rules-and-checks). A static violation produces a failed result without launching the worker.
 
-An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. That worker calls `eval_device.eval_sample_on_device`. In `aclnn` mode it builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. `jit` mode is reserved and not implemented. Results travel through a temporary JSON file rather than standard output.
+An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. That worker calls `eval_device.eval_sample_on_device`. It builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. Results travel through a temporary JSON file rather than standard output.
 
 The host allows `eval_timeout + 2 * build_timeout` seconds for the whole worker: 1,500 seconds with the defaults. There is no separate 300-second timer started after compilation. On an overall timeout, the host attempts to kill the worker's entire process group and records a failure.
 

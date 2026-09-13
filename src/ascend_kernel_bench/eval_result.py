@@ -102,7 +102,6 @@ def eval_protocol_metadata(
     num_correct_trials: int,
     num_warmup: int,
     num_perf_trials: int,
-    operator_mode: str,
     l2_clear_size: int,
     atol: float,
     rtol: float,
@@ -116,7 +115,6 @@ def eval_protocol_metadata(
         num_correct_trials: Number of seeded correctness trials.
         num_warmup: Warmup calls before measured trials.
         num_perf_trials: Retained NPU-event measurements per model.
-        operator_mode: Compilation mode (currently ``aclnn``).
         l2_clear_size: Bytes allocated to flush L2 before each timed call.
         atol: Absolute comparison tolerance used for this sample.
         rtol: Relative comparison tolerance used for this sample.
@@ -131,7 +129,7 @@ def eval_protocol_metadata(
         "correctness_trials": num_correct_trials,
         "num_warmup": num_warmup,
         "num_perf_trials": num_perf_trials,
-        "operator_mode": operator_mode,
+        "operator_mode": "aclnn",
         "l2_clear_size": int(l2_clear_size),
         "atol": atol,
         "rtol": rtol,

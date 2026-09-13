@@ -20,7 +20,6 @@ from rich.console import Console
 
 from ascend_kernel_bench import rundir
 from ascend_kernel_bench.cli_util import (
-    add_operator_mode_argument,
     cli_progress,
     eval_result_lines,
     load_eval_runtime,
@@ -28,7 +27,6 @@ from ascend_kernel_bench.cli_util import (
 )
 from ascend_kernel_bench.dataset import load_task
 from ascend_kernel_bench.eval import eval_sample
-from ascend_kernel_bench.modes import OperatorModeError
 from ascend_kernel_bench.score import compute_pass_at_k, summarize_eval_results
 
 console = Console()
@@ -42,17 +40,12 @@ def main() -> None:
     parser.add_argument("--device", default="npu:0")
     parser.add_argument("--no-perf", action="store_true")
     parser.add_argument("--config", default=None)
-    add_operator_mode_argument(parser)
     args = parser.parse_args()
 
-    try:
-        runtime = load_eval_runtime(
-            config_path=args.config,
-            hardware=args.hardware,
-            operator_mode=args.operator_mode,
-        )
-    except OperatorModeError as exc:
-        sys.exit(str(exc))
+    runtime = load_eval_runtime(
+        config_path=args.config,
+        hardware=args.hardware,
+    )
     config, hardware = runtime.config, runtime.hardware
     run_dir = rundir.RUNS_DIR / args.run_name
     if not run_dir.is_dir():
@@ -94,7 +87,7 @@ def main() -> None:
     console.print(f"wrote {run_dir / 'eval_results.json'}")
     summary = summarize_eval_results(results)
     sol = summary.get("mean_sol_score")
-    sol_text = f"{sol:.3f}" if isinstance(sol, (int, float)) else "-"
+    sol_text = f"{sol:.3f}" if isinstance(sol, int | float) else "-"
     console.print(
         f"compiled {summary['compiled']}/{summary['total_samples']}, "
         f"correct {summary['correct']}/{summary['total_samples']}, "

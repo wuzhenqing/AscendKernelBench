@@ -8,7 +8,6 @@ def test_default_eval_config_warmup() -> None:
     config = load_eval_config()
     assert config.num_warmup == 10
     assert config.num_perf_trials == 100
-    assert config.operator_mode == "aclnn"
 
 
 def test_910b2_profile_loads_sol_fields() -> None:

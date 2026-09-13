@@ -26,7 +26,6 @@ CLI settings are not automatically recovered from an existing run's `generation_
 | `excessive_speedup` | `10.0` | Flag speedup strictly above this ratio for review. Flagged samples remain eligible for correctness metrics but are excluded from speedup metrics. |
 | `build_timeout` | `600` | Seconds allowed for CMake configure and for build, separately. |
 | `eval_timeout` | `300` | Evaluation component of the host worker time budget; also the standalone baseline worker timeout. |
-| `operator_mode` | `aclnn` | How generated Ascend C is turned into a callable operator. `aclnn` builds a process-local `libcustom_op.so` and loads it in the evaluating PyTorch process. `jit` is reserved and not implemented. |
 
 The host evaluation worker timeout is `eval_timeout + 2 * build_timeout`: **1,500 seconds** with the defaults. This is an outer budget for the entire worker, not a separate 300-second timer around the runtime phase.
 
@@ -69,7 +68,6 @@ num_perf_trials: 100
 excessive_speedup: 10.0
 build_timeout: 600
 eval_timeout: 300
-operator_mode: aclnn
 tolerances:
   fp32: {atol: 1.0e-4, rtol: 1.0e-4}
   fp16: {atol: 1.0e-2, rtol: 1.0e-2}

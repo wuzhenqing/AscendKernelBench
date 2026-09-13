@@ -38,7 +38,7 @@ for Ascend C, not a CUDA-to-NPU score translator.
   scored sample records the protocol snapshot and software stack used to
   produce it.
 - **English generation prompts** and a fixed CMake template. The model
-  writes `custom_op.asc` and `model_new.py` only. JIT mode is reserved.
+  writes `custom_op.asc` and `model_new.py` only.
 
 The current workflow supports generation and evaluation scripts. It does
 not implement an automatic compile-error repair agent.

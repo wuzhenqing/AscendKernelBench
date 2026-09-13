@@ -16,8 +16,7 @@ capability under test.
 Prompts describe the implemented ACLNN operator-project path: a fixed modern
 CMake project builds ``libcustom_op.so`` and the evaluator calls
 ``torch.ops.load_library`` on that file. Do not ask the model for pybind11,
-an OPP / custom_opp install project, or JIT compilation. JIT mode is reserved
-and is not prompted here.
+an OPP / custom_opp install project, or in-process JIT compilation.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ from dataclasses import dataclass
 from ._paths import PROMPT_EXAMPLES_DIR
 from .config import HardwareProfile
 from .dataset import Task
-from .modes import ACLNN_MODE, require_implemented_mode
 
 SYSTEM_PROMPT = (
     "You are an expert Ascend C kernel engineer. You write correct, "
@@ -202,7 +200,6 @@ def build_prompt(
     *,
     mode: str = "one_shot",
     examples: list[PromptExample] | None = None,
-    operator_mode: str = ACLNN_MODE,
 ) -> str:
     """Assemble the full generation prompt for one task.
 
@@ -211,17 +208,14 @@ def build_prompt(
         hardware: Profile injected into the hardware-contract block.
         mode: ``zero_shot``, ``one_shot``, or ``few_shot``.
         examples: Optional override of bundled examples.
-        operator_mode: Must be implemented; JIT is rejected.
 
     Returns:
         The complete English user prompt (no system message).
 
     Raises:
-        OperatorModeError: If ``operator_mode`` is reserved or unknown.
         ValueError: If ``mode`` is unknown or examples are required
             but missing.
     """
-    require_implemented_mode(operator_mode)
     if mode not in {"zero_shot", "one_shot", "few_shot"}:
         raise ValueError(f"Unknown prompt mode: {mode}")
     components = [_problem_statement(task), _hardware_block(hardware)]

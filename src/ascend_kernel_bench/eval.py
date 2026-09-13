@@ -2,14 +2,6 @@
 
 Static check, then build, correctness, and timing run in a worker
 subprocess. See docs/guide/evaluation.md for the evaluation protocol.
-
-The host entry (:func:`eval_sample`) writes a config JSON, spawns
-``python -m ascend_kernel_bench.worker`` as a process-group leader via
-Popen, kills the whole group on timeout, and reads the result from a JSON
-file — CANN log spam on stdout never pollutes the result channel.
-
-Worker-side logic lives in :mod:`ascend_kernel_bench.eval_device`. Result
-payload helpers live in :mod:`ascend_kernel_bench.eval_result`.
 """
 
 from __future__ import annotations
@@ -29,8 +21,12 @@ from .config import EvalConfig, HardwareProfile
 from .dataset import Task
 from .eval_device import eval_sample_on_device
 from .eval_result import eval_protocol_metadata, fail_result
-from .io_util import read_json_object, write_json_atomic
-from .modes import require_implemented_mode
+from .io_util import (
+    load_cfg_argv,
+    pop_required_path,
+    read_json_object,
+    write_json_atomic,
+)
 from .timing import l2_clear_bytes
 
 __all__ = [
@@ -38,10 +34,8 @@ __all__ = [
     "eval_sample",
     "eval_sample_on_device",
     "fail_result",
+    "worker_main",
 ]
-
-# Backward-compatible alias used by the worker and older call sites.
-_fail = fail_result
 
 
 def _persist_eval_result(
@@ -67,18 +61,6 @@ def eval_sample(
     ``sample_dir`` must already contain ``custom_op.asc`` and
     ``model_new.py``. The result dict is also written to
     ``sample_dir/eval_result.json``.
-
-    Args:
-        task: Loaded KernelBench task (reference ``Model`` source).
-        sample_dir: Directory containing the two generated deliverables.
-        hardware: Profile used for CMake arch, L2 flush size, and SOL.
-        config: Evaluation timeouts, seeds, trials, and operator mode.
-        device: Runtime device string, for example ``npu:0``.
-        measure_performance: When False, skip timing and the post-timing
-            re-check.
-
-    Returns:
-        Per-sample result dict (also persisted as ``eval_result.json``).
     """
     sample_dir = Path(sample_dir)
     model_new_path = sample_dir / "model_new.py"
@@ -86,7 +68,7 @@ def eval_sample(
     if not asc_path.is_file() or not model_new_path.is_file():
         return _persist_eval_result(
             sample_dir,
-            _fail(
+            fail_result(
                 compilation_error=(
                     "sample dir missing custom_op.asc or model_new.py"
                 )
@@ -98,14 +80,12 @@ def eval_sample(
     if violations:
         return _persist_eval_result(
             sample_dir,
-            _fail(
+            fail_result(
                 compilation_error="; ".join(violations),
                 static_check_error=violations,
             ),
         )
 
-    # Configure and build each get build_timeout; the host budget covers both
-    # plus the evaluation itself.
     timeout_s = config.eval_timeout + 2 * config.build_timeout
     result = _run_eval_worker(
         {
@@ -123,7 +103,6 @@ def eval_sample(
             "tolerances": config.tolerances,
             "excessive_speedup": config.excessive_speedup,
             "build_timeout": config.build_timeout,
-            "operator_mode": require_implemented_mode(config.operator_mode),
             "memory_bandwidth_gbps": hardware.memory_bandwidth_gbps,
             "peak_tflops": hardware.peak_tflops_for(config.precision),
             "l2_clear_size": l2_clear_bytes(hardware.l2_cache_mb),
@@ -133,16 +112,19 @@ def eval_sample(
     return _persist_eval_result(sample_dir, result)
 
 
+def worker_main(argv: list[str]) -> None:
+    """Read ``cfg.json``, evaluate one sample, and write ``result_path``."""
+    cfg = load_cfg_argv(argv)
+    result_path = pop_required_path(cfg, "result_path")
+    try:
+        result = eval_sample_on_device(**cfg)
+    except Exception as exc:
+        result = fail_result(compiled=True, runtime_error=repr(exc))
+    write_json_atomic(result_path, result)
+
+
 def _run_eval_worker(cfg: dict[str, Any], timeout_s: int) -> dict[str, Any]:
-    """Spawn ``python -m ascend_kernel_bench.worker`` and return its payload.
-
-    Args:
-        cfg: Worker config without ``result_path`` (added here).
-        timeout_s: Host budget covering configure, build, and evaluation.
-
-    Returns:
-        Parsed worker result, or a failed payload on timeout / I/O error.
-    """
+    """Spawn this module as a worker and return its payload."""
     with tempfile.TemporaryDirectory(prefix="akb_eval_") as tmpdir:
         result_path = Path(tmpdir) / "result.json"
         cfg_path = Path(tmpdir) / "cfg.json"
@@ -150,7 +132,7 @@ def _run_eval_worker(cfg: dict[str, Any], timeout_s: int) -> dict[str, Any]:
         env = dict(os.environ)
         env.setdefault("ASCEND_SLOG_PRINT_TO_STDOUT", "0")
         proc = subprocess.Popen(
-            [sys.executable, "-m", "ascend_kernel_bench.worker", str(cfg_path)],
+            [sys.executable, "-m", "ascend_kernel_bench.eval", str(cfg_path)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
@@ -160,39 +142,33 @@ def _run_eval_worker(cfg: dict[str, Any], timeout_s: int) -> dict[str, Any]:
         try:
             _, stderr = proc.communicate(timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            # start_new_session makes the worker a process-group leader, so
-            # killpg reaps the worker and anything it forked (a hung NPU job
-            # included) instead of leaking the group on the device.
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
-            return _fail(runtime_error=f"eval timed out after {timeout_s}s")
+            return fail_result(
+                runtime_error=f"eval timed out after {timeout_s}s"
+            )
 
         if proc.returncode != 0:
             err = (stderr or "").strip()
-            return _fail(
+            return fail_result(
                 runtime_error=err[-2000:]
                 or f"worker exited with code {proc.returncode}"
             )
-
         return _read_worker_payload(result_path)
 
 
 def _read_worker_payload(result_path: Path) -> dict[str, Any]:
-    """Load the worker JSON object, or return a failed payload.
-
-    Args:
-        result_path: Path written by ``worker.main``.
-
-    Returns:
-        Parsed result dict, or a failed payload when the file is missing,
-        invalid JSON, or not an object.
-    """
+    """Load the worker JSON object, or return a failed payload."""
     if not result_path.is_file():
-        return _fail(runtime_error="worker produced no result.json")
+        return fail_result(runtime_error="worker produced no result.json")
     try:
         return read_json_object(result_path)
     except json.JSONDecodeError as exc:
-        return _fail(runtime_error=f"invalid worker JSON: {exc}")
+        return fail_result(runtime_error=f"invalid worker JSON: {exc}")
     except ValueError:
-        return _fail(runtime_error="worker JSON is not an object")
+        return fail_result(runtime_error="worker JSON is not an object")
+
+
+if __name__ == "__main__":
+    worker_main(sys.argv)

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -17,7 +16,6 @@ from .config import (
     load_hardware_profile,
 )
 from .dataset import Task, discover_tasks, load_task
-from .modes import OPERATOR_MODES, require_implemented_mode
 
 
 @dataclass(frozen=True)
@@ -70,20 +68,6 @@ def resolve_generation_settings(
     )
 
 
-def add_operator_mode_argument(parser: argparse.ArgumentParser) -> None:
-    """Add ``--operator-mode`` with the supported mode names.
-
-    Args:
-        parser: Argument parser for a CLI script.
-    """
-    parser.add_argument(
-        "--operator-mode",
-        default=None,
-        choices=list(OPERATOR_MODES),
-        help="aclnn (process-local .so) or jit (not implemented yet)",
-    )
-
-
 @dataclass(frozen=True)
 class EvalRuntime:
     """Loaded evaluation config plus the resolved hardware profile."""
@@ -96,23 +80,20 @@ def load_eval_runtime(
     *,
     config_path: str | None = None,
     hardware: str | None = None,
-    operator_mode: str | None = None,
 ) -> EvalRuntime:
-    """Load YAML defaults, apply the operator-mode flag, and resolve hardware.
+    """Load YAML defaults and resolve the hardware profile.
 
     Args:
         config_path: Optional ``--config`` path.
         hardware: Optional ``--hardware`` name or YAML path.
-        operator_mode: Optional ``--operator-mode`` value.
 
     Returns:
         Frozen config and hardware used by the benchmark CLIs.
 
     Raises:
-        OperatorModeError: If the mode is unknown or still reserved.
         FileNotFoundError: If the config or hardware YAML is missing.
     """
-    config = apply_operator_mode(load_eval_config(config_path), operator_mode)
+    config = load_eval_config(config_path)
     return EvalRuntime(
         config=config,
         hardware=load_hardware_profile(hardware or config.hardware),
@@ -140,32 +121,10 @@ def select_tasks(
     return discover_tasks()
 
 
-def apply_operator_mode(config: EvalConfig, cli_mode: str | None) -> EvalConfig:
-    """Return ``config`` with a validated, implemented operator mode.
-
-    Args:
-        config: Loaded evaluation configuration.
-        cli_mode: Optional ``--operator-mode`` value.
-
-    Returns:
-        A config whose ``operator_mode`` is implemented.
-
-    Raises:
-        OperatorModeError: If the mode is unknown or still reserved.
-    """
-    if cli_mode:
-        return replace(
-            config, operator_mode=require_implemented_mode(cli_mode)
-        )
-    require_implemented_mode(config.operator_mode)
-    return config
-
-
 def generation_run_config(
     settings: GenerationSettings,
     *,
     hardware_name: str,
-    operator_mode: str,
     task_ids: list[str],
     **extra: object,
 ) -> dict[str, object]:
@@ -174,7 +133,6 @@ def generation_run_config(
     Args:
         settings: Resolved generation settings.
         hardware_name: Hardware profile name.
-        operator_mode: Implemented operator mode.
         task_ids: Task identifiers included in the run.
         **extra: Optional extra keys such as ``device``.
 
@@ -188,7 +146,6 @@ def generation_run_config(
         "prompt_mode": settings.prompt_mode,
         "num_samples": settings.num_samples,
         "hardware": hardware_name,
-        "operator_mode": operator_mode,
         "tasks": list(task_ids),
     }
     payload.update(extra)
@@ -213,8 +170,8 @@ def eval_result_lines(result: dict[str, object]) -> tuple[str, list[str]]:
     runtime = result.get("runtime")
     ref_runtime = result.get("ref_runtime")
     if (
-        isinstance(runtime, (int, float))
-        and isinstance(ref_runtime, (int, float))
+        isinstance(runtime, int | float)
+        and isinstance(ref_runtime, int | float)
         and runtime
     ):
         speedup = ref_runtime / runtime
