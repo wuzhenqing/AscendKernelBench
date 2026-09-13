@@ -1,6 +1,5 @@
 # AscendKernelBench
 
-[![Documentation](https://github.com/wuzhenqing/AscendKernelBench/actions/workflows/docs.yml/badge.svg)](https://github.com/wuzhenqing/AscendKernelBench/actions/workflows/docs.yml)
 [![Quality](https://github.com/wuzhenqing/AscendKernelBench/actions/workflows/quality.yml/badge.svg)](https://github.com/wuzhenqing/AscendKernelBench/actions/workflows/quality.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
@@ -13,10 +12,10 @@ loads that library with `torch.ops.load_library`, checks outputs against
 the reference, and times eligible kernels against live `torch_npu` eager
 execution.
 
-**[Documentation](https://wuzhenqing.github.io/AscendKernelBench/)** ·
-[Getting started](https://wuzhenqing.github.io/AscendKernelBench/guide/getting-started.html) ·
-[Evaluation protocol](https://wuzhenqing.github.io/AscendKernelBench/guide/evaluation.html) ·
-[Results and metrics](https://wuzhenqing.github.io/AscendKernelBench/guide/results.html) ·
+[Documentation](docs/index.md) ·
+[Getting started](docs/guide/getting-started.md) ·
+[Evaluation protocol](docs/guide/evaluation.md) ·
+[Results and metrics](docs/guide/results.md) ·
 [Contributing](CONTRIBUTING.md)
 
 ## Why this benchmark
@@ -50,7 +49,7 @@ not implement an automatic compile-error repair agent.
 | --- | --- | --- |
 | Read tasks and build prompts | Yes | Yes |
 | Generate candidates with a remote LLM | Yes | Yes |
-| Lint, unit-test, and preview docs | Yes | Yes |
+| Lint and unit-test | Yes | Yes |
 | Analyze saved `eval_results.json` | Yes | Yes |
 | Compile, check, or time a kernel | No | Required |
 
@@ -85,7 +84,7 @@ python -m pip install -e ".[dev]"
 ```
 
 The base extra does **not** install CANN, the NPU driver, or a hardware
-runtime. See [getting started](https://wuzhenqing.github.io/AscendKernelBench/guide/getting-started.html).
+runtime. See [getting started](docs/guide/getting-started.md).
 
 Generate (any machine with network access to your LLM):
 
@@ -161,8 +160,8 @@ src/ascend_kernel_bench/     Generation, build, evaluation, and scoring
 scripts/                     Five benchmark CLIs
 configs/                     Eval defaults and hardware profiles
 build_template/              CMake project that writes libcustom_op.so
-docs/                        English VitePress documentation
-.github/workflows/           Docs Pages + lint/test quality gate
+docs/                        English Markdown guides and references
+.github/workflows/           Lint and unit-test quality gate
 environment.yml              Conda recipe for the akb experiment env
 ```
 
@@ -173,13 +172,6 @@ python -m pip install -e ".[dev]"
 pre-commit install
 pre-commit run --all-files
 pytest
-```
-
-When Node.js 24 is available (see `.nvmrc`):
-
-```bash
-npm ci
-npm run docs:check
 ```
 
 Style is enforced by pre-commit: Ruff (PEP 8 + Google pydocstyle),

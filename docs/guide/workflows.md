@@ -4,7 +4,7 @@ Use separate generation and evaluation steps when developing on macOS, comparing
 
 ## Generate a small, explicit task set
 
-After [configuring your environment](/guide/getting-started), generate candidates for selected tasks:
+After [configuring your environment](getting-started.md), generate candidates for selected tasks:
 
 ```bash
 python scripts/generate.py \
@@ -25,9 +25,10 @@ Generation requests structured output first and falls back to fenced code blocks
 
 `one_shot` includes the first bundled example; `few_shot` includes every bundled example. The current checkout ships an elementwise-add example and a LeakyReLU example. `zero_shot` omits examples.
 
-::: warning Preserve separate experiments
-Use a new run name for each experiment. Reusing a name overwrites `generation_config.yaml` and matching sample source files, while old samples, build artifacts, and evaluation results can remain. Reusing a directory is not a clean restart.
-:::
+> **Preserve separate experiments.** Use a new run name for each experiment.
+> Reusing a name overwrites `generation_config.yaml` and matching sample source
+> files, while old samples, build artifacts, and evaluation results can remain.
+> Reusing a directory is not a clean restart.
 
 ## Inspect generated files locally
 
@@ -45,11 +46,11 @@ print("\n".join(violations) if violations else "No static violations found")
 PY
 ```
 
-Passing this check does not establish compiler compatibility or numerical correctness. Read the [evaluation protocol](/guide/evaluation) for the checks applied on the device.
+Passing this check does not establish compiler compatibility or numerical correctness. Read the [evaluation protocol](evaluation.md) for the checks applied on the device.
 
 ## Move a run from macOS to Linux
 
-Prepare the [Ascend environment](/guide/getting-started#prepare-an-ascend-evaluation-machine) on the destination, using the same repository revision and task sources. Copy the run directory into that checkout's `runs/` directory. For example, once the destination `runs/` directory exists:
+Prepare the [Ascend environment](getting-started.md#prepare-an-ascend-evaluation-machine) on the destination, using the same repository revision and task sources. Copy the run directory into that checkout's `runs/` directory. For example, once the destination `runs/` directory exists:
 
 ```bash
 scp -r runs/activations-10 \
@@ -85,9 +86,11 @@ python scripts/evaluate.py \
 
 This still needs the Ascend compiler and NPU. It produces no runtime or speedup measurement.
 
-::: warning Select the hardware again
-Evaluation does not load `generation_config.yaml` to select hardware. Pass the intended `--hardware`, or use an evaluation configuration containing the same hardware profile. Otherwise, the evaluator uses the current configuration's default, `ascend910b2`.
-:::
+> **Select the hardware again.** Evaluation does not load
+> `generation_config.yaml` to select hardware. Pass the intended `--hardware`,
+> or use an evaluation configuration containing the same hardware profile.
+> Otherwise, the evaluator uses the current configuration's default,
+> `ascend910b2`.
 
 The evaluator rebuilds and reevaluates samples on each invocation, overwrites their `eval_result.json` files, and rewrites the run's aggregate files. Save a separate copy of a run before comparing repeated evaluations. Archived baselines are not read by this command: it measures the reference in the same worker as the candidate.
 
@@ -103,7 +106,7 @@ The report shows compile and correctness counts, NPU/CPU-reference coverage, fla
 
 You can copy the run back to macOS for analysis. For reporting alone, `runs/activations-10/eval_results.json` is sufficient. Keep the full run if you also want to inspect generated code or compilation diagnostics.
 
-Ten successfully saved and evaluated samples per task allow `pass@1`, `pass@5`, and `pass@10` to be reported. Missing generations are not represented as failed evaluation samples. Check the generation command's final saved/expected count before interpreting scores: partially failed generation batches can exit successfully. See [results and metrics](/guide/results) for metric denominators and eligibility rules.
+Ten successfully saved and evaluated samples per task allow `pass@1`, `pass@5`, and `pass@10` to be reported. Missing generations are not represented as failed evaluation samples. Check the generation command's final saved/expected count before interpreting scores: partially failed generation batches can exit successfully. See [results and metrics](results.md) for metric denominators and eligibility rules.
 
 ## Run one task end to end
 
@@ -135,4 +138,4 @@ This writes `results/baseline/ascend910b2/19_ReLU.json`. Unsupported NPU referen
 
 Archive paths contain the hardware profile name and task file stem, but not precision, configuration, timestamp, or level. Repeated measurements overwrite the same path; preserve copies when comparing configurations.
 
-All flags are listed in the [CLI reference](/reference/cli), with defaults and precedence in [configuration](/reference/configuration).
+All flags are listed in the [CLI reference](../reference/cli.md), with defaults and precedence in [configuration](../reference/configuration.md).

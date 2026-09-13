@@ -38,7 +38,7 @@ Hooks enforce:
 | pre-commit-hooks | Trailing whitespace, EOF, YAML/TOML/JSON, debug leftovers |
 | codespell | Common misspellings |
 
-Vendored `KernelBench/` tasks and VitePress build output are excluded.
+Vendored `KernelBench/` tasks are excluded.
 Few-shot prompt examples keep the KernelBench `Model` / `A` / `B`
 contract and are excluded from docstring/naming rules.
 
@@ -69,13 +69,17 @@ change.
 
 ## Documentation
 
-User-facing docs are English VitePress pages under `docs/`. After
+User-facing docs are English Markdown pages under `docs/`. After
 changing CLI flags, result fields, or the evaluation protocol:
 
-1. Update the matching page (`guide/evaluation.md`, `guide/results.md`,
-   `reference/configuration.md`, `reference/cli.md`).
+1. Update the matching page (`docs/guide/evaluation.md`,
+   `docs/guide/results.md`, `docs/reference/configuration.md`,
+   `docs/reference/cli.md`).
 2. Update `README.md` if the quick start, metrics, or layout changed.
-3. Run `npm ci && npm run docs:check` with Node.js 24 (see `.nvmrc`).
+3. Keep links relative (`evaluation.md`, `../reference/cli.md`) so the
+   pages stay readable on GitHub.
+
+There is no documentation site or Pages workflow.
 
 ## Pull requests
 

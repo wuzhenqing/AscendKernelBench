@@ -44,7 +44,7 @@ The batch evaluator visits every complete sample directory sequentially and re-e
 
 ## Worker and build lifecycle
 
-For each sample, the host checks that `custom_op.asc` and `model_new.py` exist and applies the [candidate static checks](/task_authoring#candidate-rules-and-checks). A static violation produces a failed result without launching the worker.
+For each sample, the host checks that `custom_op.asc` and `model_new.py` exist and applies the [candidate static checks](../task_authoring.md#candidate-rules-and-checks). A static violation produces a failed result without launching the worker.
 
 An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. That worker calls `eval_device.eval_sample_on_device`. In `aclnn` mode it builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. `jit` mode is reserved and not implemented. Results travel through a temporary JSON file rather than standard output.
 
@@ -81,7 +81,7 @@ Default tolerances are:
 | `fp16` | `1e-2` | `1e-2` |
 | `bf16` | `1e-2` | `1e-2` |
 
-Tensor shapes must match. Floating-point/complex tensors use `torch.allclose`; pairs of integer/Boolean tensors use `torch.equal`. The default matcher handles tuple/list outputs recursively. A nonempty task `TOLERANCE` overrides configured tolerances, and `custom_check(ref, out)` replaces the default comparison entirely. See [task authoring](/task_authoring#precision-and-output-checks) for contract limits.
+Tensor shapes must match. Floating-point/complex tensors use `torch.allclose`; pairs of integer/Boolean tensors use `torch.equal`. The default matcher handles tuple/list outputs recursively. A nonempty task `TOLERANCE` overrides configured tolerances, and `custom_check(ref, out)` replaces the default comparison entirely. See [task authoring](../task_authoring.md#precision-and-output-checks) for contract limits.
 
 ### CPU reference fallback
 
@@ -116,7 +116,7 @@ For each timed model, the timer performs ten warmups by default, synchronizing a
 4. Records the start event, invokes the model, and records the end event.
 5. Synchronizes and reads elapsed event time in milliseconds.
 
-When both candidate and NPU-reference means are available, the worker also records a roofline SOL bound (`bytes_moved / profile bandwidth`, optionally `max`ed with `FLOPS / peak_tflops` when the task declares a FLOP count) and a SOL-ExecBench-style `sol_score`. The bound is a documented profile estimate, not a NVIDIA SOLAR characterization. See [results and scoring](/guide/results).
+When both candidate and NPU-reference means are available, the worker also records a roofline SOL bound (`bytes_moved / profile bandwidth`, optionally `max`ed with `FLOPS / peak_tflops` when the task declares a FLOP count) and a SOL-ExecBench-style `sol_score`. The bound is a documented profile estimate, not a NVIDIA SOLAR characterization. See [results and scoring](results.md).
 
 Every scored sample also records a protocol snapshot (`seed`, trial counts, warmup, `l2_clear_size`) and the worker software stack (PyTorch, torch-npu, device name, and CANN version when the environment exposes it).
 
@@ -130,7 +130,7 @@ After the timing attempt, the evaluator draws another input set using `seed + 1`
 
 A timing exception is recorded in `metadata.runtime_error`. If the post-timing check succeeds, the result may remain correct with missing or partially populated timing fields.
 
-When both mean runtimes are available, a speedup strictly above `excessive_speedup` is marked for manual review. The flag does not automatically make the sample incorrect. It excludes the sample from positive `fast_p` thresholds and geometric mean speedup while preserving its contribution to `fast_0` and pass@k. See [results and scoring](/guide/results).
+When both mean runtimes are available, a speedup strictly above `excessive_speedup` is marked for manual review. The flag does not automatically make the sample incorrect. It excludes the sample from positive `fast_p` thresholds and geometric mean speedup while preserving its contribution to `fast_0` and pass@k. See [results and scoring](results.md).
 
 ## Archive a reference baseline
 

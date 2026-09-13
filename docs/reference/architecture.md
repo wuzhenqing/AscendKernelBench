@@ -95,7 +95,7 @@ Build configuration is controlled by the repository template. The generated `.as
 
 Two operator modes are defined. `aclnn` is the path above. `jit` is reserved for a future KernelBench-style in-process compile and is rejected until it is merged.
 
-The [evaluation guide](/guide/evaluation) documents seeded initialization, tolerance rules, CPU-reference fallback, timeout accounting, and event timing. The [task authoring guide](/task_authoring) describes both reference and candidate contracts.
+The [evaluation guide](../guide/evaluation.md) documents seeded initialization, tolerance rules, CPU-reference fallback, timeout accounting, and event timing. The [task authoring guide](../task_authoring.md) describes both reference and candidate contracts.
 
 ## Persistence and scoring boundary
 
@@ -105,4 +105,4 @@ Generation creates the two implementation files and accompanying prompt/response
 
 Compiled extensions and build directories are machine-specific. Transfer source artifacts and configuration to the destination machine and let evaluation build there. Preserve separate run copies when comparing machines because result filenames are reused.
 
-The [results guide](/guide/results) explains what is persisted, which failures enter the denominator, and how reference mode or flags affect each metric.
+The [results guide](../guide/results.md) explains what is persisted, which failures enter the denominator, and how reference mode or flags affect each metric.

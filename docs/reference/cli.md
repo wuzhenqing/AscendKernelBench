@@ -1,6 +1,6 @@
 # CLI reference
 
-Run these scripts from the checkout root after [installing the package](/guide/getting-started). Each supports `-h` / `--help`. There is no installed `akb` or `ascend-kernel-bench` command-line entry point.
+Run these scripts from the checkout root after [installing the package](../guide/getting-started.md). Each supports `-h` / `--help`. There is no installed `akb` or `ascend-kernel-bench` command-line entry point.
 
 ## Common conventions
 
@@ -136,4 +136,4 @@ python scripts/analyze.py --run-name relu-10
 
 The script recalculates metrics in memory and prints them, including `fast_p`, geometric-mean speedup, `pass@k`, and mean roofline SOL score when present. It writes no report files, does not collect per-sample results, and does not update `pass_at_k_results.json`. A missing aggregate file causes a nonzero exit.
 
-See [configuration](/reference/configuration) for defaults and environment variables, and [results](/guide/results) for the result schema and scoring rules.
+See [configuration](configuration.md) for defaults and environment variables, and [results](../guide/results.md) for the result schema and scoring rules.

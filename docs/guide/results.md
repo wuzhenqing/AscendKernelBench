@@ -206,4 +206,4 @@ The example is illustrative. Higher `k` values are omitted when the problem lack
 
 Record the task source/revision, exact problem and sample counts, generation model/settings, hardware and runtime device, CANN/PyTorch/`torch_npu` versions, precision/tolerances, timing configuration, CPU fallback count, and flagged sample count.
 
-The JSON format follows KernelBench-style result conventions. This format compatibility does not make scores directly comparable across NPU/GPU hardware, baseline implementations, task revisions, or timing protocols. Use the [evaluation protocol](/guide/evaluation) to identify those differences before interpreting a speedup.
+The JSON format follows KernelBench-style result conventions. This format compatibility does not make scores directly comparable across NPU/GPU hardware, baseline implementations, task revisions, or timing protocols. Use the [evaluation protocol](evaluation.md) to identify those differences before interpreting a speedup.

@@ -39,7 +39,7 @@ The scripts add `src/` to their own import path, but an evaluation worker starts
 
 ### Missing `torch` or `torch_npu`
 
-The base package dependencies support generation and analysis. They do not install the Ascend runtime stack. On a Linux host with CANN 9.1.0, recreate the experiment environment with `conda env create -f environment.yml`, then `conda activate akb` and source `set_env.sh` (see [getting started](/guide/getting-started)). Use that same interpreter for evaluation; the CMake build receives it as `Python3_EXECUTABLE` and discovers PyTorch / `torch_npu` through it.
+The base package dependencies support generation and analysis. They do not install the Ascend runtime stack. On a Linux host with CANN 9.1.0, recreate the experiment environment with `conda env create -f environment.yml`, then `conda activate akb` and source `set_env.sh` (see [getting started](getting-started.md)). Use that same interpreter for evaluation; the CMake build receives it as `Python3_EXECUTABLE` and discovers PyTorch / `torch_npu` through it.
 
 Do not try to resolve a missing `torch_npu` import on macOS by substituting a CPU evaluation path. Move the saved sources to the prepared Ascend host instead. Some tasks also import optional libraries; inspect the task's imports when a reference module cannot load.
 
@@ -57,7 +57,7 @@ This also chooses the `runs/` and `results/` directories. Changing the current d
 
 ## LLM connection and response errors
 
-See [Connect an LLM service](/deploy_llm_service) for the endpoint contract.
+See [Connect an LLM service](../deploy_llm_service.md) for the endpoint contract.
 
 | Symptom | What to check |
 | --- | --- |
@@ -89,7 +89,7 @@ When moving between machines or incompatible Python environments, carry the cand
 - CPU / NumPy fallback, exception-based fallback, and empty `pass` implementations.
 - Timing manipulation, custom streams, result caching patterns, and host-side process or networking operations.
 
-`ModelNew` may construct matching `nn` layers to hold initialized parameters, but it must pass their weights to the custom operator rather than call the layers for computation. Follow the [candidate contract](/task_authoring) when correcting a rejection.
+`ModelNew` may construct matching `nn` layers to hold initialized parameters, but it must pass their weights to the custom operator rather than call the layers for computation. Follow the [candidate contract](../task_authoring.md) when correcting a rejection.
 
 The checks are heuristic and are not a security sandbox. If a valid wrapper is rejected, inspect the specific diagnostic and the checker implementation; do not interpret a static pass as proof of correctness.
 

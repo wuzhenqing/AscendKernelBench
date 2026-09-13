@@ -79,7 +79,7 @@ print("Source:", task.path)
 PY
 ```
 
-The committed task set contains 270 tasks across four levels. Use a task ID such as `level1/19_ReLU`, without the `KernelBench/` prefix or `.py` extension. See [task authoring](/task_authoring) for the task contract.
+The committed task set contains 270 tasks across four levels. Use a task ID such as `level1/19_ReLU`, without the `KernelBench/` prefix or `.py` extension. See [task authoring](../task_authoring.md) for the task contract.
 
 You can also inspect exactly what will be sent to the model, without making an API request:
 
@@ -119,7 +119,7 @@ python scripts/generate.py \
 
 Replace the placeholder values before running. Generation sends the task source and prompt examples to the configured service. It writes `custom_op.asc`, `model_new.py`, and prompt/response files under `runs/relu-demo/level1/19_ReLU/sample_0/`. It does not build or evaluate the generated operator.
 
-See [LLM service configuration](/deploy_llm_service) for endpoint behavior and [workflows](/guide/workflows) for moving a run to an Ascend machine.
+See [LLM service configuration](../deploy_llm_service.md) for endpoint behavior and [workflows](workflows.md) for moving a run to an Ascend machine.
 
 ## Prepare an Ascend evaluation machine
 
@@ -150,4 +150,4 @@ PY
 
 This checks basic imports and device availability. Successful compilation, correctness, and performance must be verified on the target machine. The documentation work performed on macOS does not establish any NPU evaluation result.
 
-Continue with [generation and evaluation workflows](/guide/workflows), or consult [troubleshooting](/guide/troubleshooting) if setup fails.
+Continue with [generation and evaluation workflows](workflows.md), or consult [troubleshooting](troubleshooting.md) if setup fails.

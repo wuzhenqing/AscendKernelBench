@@ -66,7 +66,7 @@ By default, tensor shapes must match. Floating-point and complex outputs use `to
 
 A nonempty task `TOLERANCE` takes precedence over the evaluation configuration. If either tolerance key is omitted from that dictionary, its fallback is `1e-4`. A `custom_check` takes precedence over the default matcher and is used for both the initial trials and the post-timing check. It should validate the whole result, including structure and shape where relevant; the default shape check does not run first.
 
-The primary reference is eager PyTorch with `torch_npu` on the selected NPU. A reference construction failure or an exception from reference execution/synchronization during an initial correctness trial switches reference execution to CPU. CPU inputs use float32 for floating-point tensors, and no NPU reference speedup is reported. A CPU fallback result therefore does not, by itself, prove that the operator is unsupported by `torch_npu`: inspect `metadata.reference_npu_error` for the actual cause. See the [evaluation protocol](/guide/evaluation).
+The primary reference is eager PyTorch with `torch_npu` on the selected NPU. A reference construction failure or an exception from reference execution/synchronization during an initial correctness trial switches reference execution to CPU. CPU inputs use float32 for floating-point tensors, and no NPU reference speedup is reported. A CPU fallback result therefore does not, by itself, prove that the operator is unsupported by `torch_npu`: inspect `metadata.reference_npu_error` for the actual cause. See the [evaluation protocol](guide/evaluation.md).
 
 ## Candidate contract
 
@@ -121,7 +121,7 @@ The [checker implementation](https://github.com/wuzhenqing/AscendKernelBench/blo
    Replace the example ID with your new task ID. This requires the package to be installed, but it does not require an NPU.
 
 3. Review initialization, input generation, shapes, output structure, and optional comparison overrides.
-4. On a configured Ascend machine, evaluate candidate correctness and timing using the [evaluation workflow](/guide/evaluation).
+4. On a configured Ascend machine, evaluate candidate correctness and timing using the [evaluation workflow](guide/evaluation.md).
 5. Preserve the task source, configuration, hardware/software environment, and results when publishing measurements.
 
 Changing an existing task's shapes, precision requirements, or reference semantics changes what is measured. Record the repository revision when comparing results across runs.

@@ -221,7 +221,6 @@ __marimo__/
 runs/
 results/
 
-# Documentation site
+# Leftover Node installs from the retired docs site
 node_modules/
-docs/.vitepress/cache/
-docs/.vitepress/dist/
+

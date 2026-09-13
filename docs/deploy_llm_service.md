@@ -46,7 +46,7 @@ Both paths strip outer Markdown fences and check for these minimum markers:
 - Ascend C: `__global__`, `__vector__`, `TORCH_LIBRARY`, and `TORCH_LIBRARY_IMPL`.
 - Python: `class ModelNew` and `torch.ops.custom_op`.
 
-These are content checks. The more detailed static checks run during evaluation, before compilation. See [task and candidate contracts](/task_authoring).
+These are content checks. The more detailed static checks run during evaluation, before compilation. See [task and candidate contracts](task_authoring.md).
 
 The generation loop permits one retry after an invalid result or exception. Each attempt may include both a structured and a plain request, and the SDK may perform additional transport retries. One requested sample therefore does not necessarily equal one API request. The plain fallback is attempted after any structured-path exception, including connection and authentication errors, so inspect the underlying error when troubleshooting.
 
@@ -92,4 +92,4 @@ Confirm the physical allocation and visible device mapping on your host. AscendK
 
 The `ascend950pr` profile is reserved and requires hardware and toolchain validation before use. Its presence in the configuration directory does not establish support for either model serving or kernel evaluation.
 
-For connection errors, missing sample files, and evaluation failures, see [troubleshooting](/guide/troubleshooting).
+For connection errors, missing sample files, and evaluation failures, see [troubleshooting](guide/troubleshooting.md).

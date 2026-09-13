@@ -39,7 +39,7 @@ tolerances:
   bf16: {atol: 1.0e-2, rtol: 1.0e-2}
 ```
 
-A task's nonempty `TOLERANCE` mapping takes precedence over configured tolerance values. A task can also define `custom_check(ref, out)` to control comparison. See the [task contract](/task_authoring) and [evaluation protocol](/guide/evaluation).
+A task's nonempty `TOLERANCE` mapping takes precedence over configured tolerance values. A task can also define `custom_check(ref, out)` to control comparison. See the [task contract](../task_authoring.md) and [evaluation protocol](../guide/evaluation.md).
 
 Use positive trial counts and timeouts. Set `num_warmup` to a nonnegative integer. Configuration changes alter the evaluation protocol; preserve the exact YAML used when comparing results.
 
@@ -144,4 +144,4 @@ The default repository root is derived from the source package location. A check
 export AKB_REPO_ROOT=/absolute/path/to/AscendKernelBench
 ```
 
-This redirects data paths; it does not install the scripts, change the working directory, or select a Python environment. The `scripts/*.py` launchers still load source from their own checkout. See [architecture](/reference/architecture) for the repository layout.
+This redirects data paths; it does not install the scripts, change the working directory, or select a Python environment. The `scripts/*.py` launchers still load source from their own checkout. See [architecture](architecture.md) for the repository layout.
