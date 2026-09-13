@@ -1,6 +1,8 @@
 # CLI reference
 
-Run these scripts from the checkout root after [installing the package](../guide/getting-started.md). Each supports `-h` / `--help`. There is no installed `akb` or `ascend-kernel-bench` command-line entry point.
+Run these scripts from the checkout root. Each script bootstraps the repository `src/` directory, so an editable `pip install` of this package is not required to import it. Third-party dependencies still need to be installed; see [getting started](../guide/getting-started.md). Each command supports `-h` / `--help`. There is no installed `akb` or `ascend-kernel-bench` command-line entry point.
+
+`scripts/_eval_worker.py` is an internal process entry used by `evaluate_run`. Do not invoke it directly.
 
 ## Common conventions
 
@@ -62,7 +64,7 @@ python scripts/evaluate.py \
 | `--no-perf` | Disabled | Skip performance timing; compilation and correctness checks still run. |
 | `--config PATH` | `configs/eval_default.yaml` | Evaluation protocol settings. |
 
-This command has no `--task`, `--level`, `--sample-id`, or generation options. It discovers sample directories under `runs/<name>/level*/*/sample_*` that contain both `custom_op.asc` and `model_new.py`.
+This command is a thin wrapper around `evaluate_run`. Embedding code should call that function (or `eval_sample` for one directory) instead of importing the script. This command has no `--task`, `--level`, `--sample-id`, or generation options. It discovers sample directories under `runs/<name>/level*/*/sample_*` that contain both `custom_op.asc` and `model_new.py`.
 
 It writes per-sample `eval_result.json`, followed by the run's `eval_results.json` and `pass_at_k_results.json`. It does not infer hardware from the saved generation configuration. Existing evaluation results are replaced.
 

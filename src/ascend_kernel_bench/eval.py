@@ -1,5 +1,6 @@
 """Isolated evaluation of one generated Ascend C sample.
 
+Public host entry points are :func:`eval_sample` and :func:`evaluate_run`.
 Static check, then build, correctness, and timing run in a worker
 subprocess. See docs/guide/evaluation.md for the evaluation protocol.
 """
@@ -13,28 +14,29 @@ import signal
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from . import rundir
+from ._paths import REPO_ROOT
 from .checker import check_custom_op_asc, check_model_new
 from .config import EvalConfig, HardwareProfile
-from .dataset import Task
+from .dataset import Task, load_task
 from .eval_device import eval_sample_on_device
-from .eval_result import eval_protocol_metadata, fail_result
+from .eval_result import fail_result
 from .io_util import (
     load_cfg_argv,
     pop_required_path,
     read_json_object,
     write_json_atomic,
 )
+from .score import compute_pass_at_k
 from .timing import l2_clear_bytes
 
 __all__ = [
-    "eval_protocol_metadata",
     "eval_sample",
-    "eval_sample_on_device",
-    "fail_result",
-    "worker_main",
+    "evaluate_run",
 ]
 
 
@@ -112,6 +114,70 @@ def eval_sample(
     return _persist_eval_result(sample_dir, result)
 
 
+def evaluate_run(
+    run_dir: Path,
+    *,
+    hardware: HardwareProfile,
+    config: EvalConfig,
+    device: str = "npu:0",
+    measure_performance: bool = True,
+    on_sample: Callable[[str, int, dict[str, Any]], None] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Evaluate every complete sample in ``run_dir`` and write aggregates.
+
+    Each sample is checked and isolated through :func:`eval_sample`. After
+    the batch finishes, ``eval_results.json`` and ``pass_at_k_results.json``
+    are written next to the samples.
+
+    Args:
+        run_dir: Existing run directory under ``runs/``.
+        hardware: Compilation target and result hardware label.
+        config: Evaluation protocol settings.
+        device: NPU device string forwarded to each worker.
+        measure_performance: When False, skip timing after correctness.
+        on_sample: Optional ``(task_id, sample_id, result)`` callback
+            invoked after each sample. Used by the CLI for progress.
+
+    Returns:
+        KernelBench-compatible mapping of task id to sample result dicts.
+
+    Raises:
+        FileNotFoundError: If ``run_dir`` does not exist.
+        ValueError: If the run contains no complete samples.
+    """
+    run_dir = Path(run_dir)
+    if not run_dir.is_dir():
+        raise FileNotFoundError(f"run dir not found: {run_dir}")
+    samples = list(rundir.iter_sample_dirs(run_dir))
+    if not samples:
+        raise ValueError(f"no samples in {run_dir}")
+
+    for task_id, sample_id, sample_path in samples:
+        result = eval_sample(
+            load_task(task_id),
+            sample_path,
+            hardware=hardware,
+            config=config,
+            device=device,
+            measure_performance=measure_performance,
+        )
+        if on_sample is not None:
+            on_sample(task_id, sample_id, result)
+
+    results = rundir.collect_eval_results(run_dir)
+    rundir.write_eval_results(run_dir, results)
+    rundir.write_pass_at_k(run_dir, compute_pass_at_k(results))
+    return results
+
+
+def _worker_argv(cfg_path: Path) -> list[str]:
+    """Return the argv that starts the isolated eval worker script."""
+    worker = REPO_ROOT / "scripts" / "_eval_worker.py"
+    if not worker.is_file():
+        raise FileNotFoundError(f"eval worker script not found: {worker}")
+    return [sys.executable, str(worker), str(cfg_path)]
+
+
 def worker_main(argv: list[str]) -> None:
     """Read ``cfg.json``, evaluate one sample, and write ``result_path``."""
     cfg = load_cfg_argv(argv)
@@ -124,7 +190,7 @@ def worker_main(argv: list[str]) -> None:
 
 
 def _run_eval_worker(cfg: dict[str, Any], timeout_s: int) -> dict[str, Any]:
-    """Spawn this module as a worker and return its payload."""
+    """Spawn the repo worker script and return its payload."""
     with tempfile.TemporaryDirectory(prefix="akb_eval_") as tmpdir:
         result_path = Path(tmpdir) / "result.json"
         cfg_path = Path(tmpdir) / "cfg.json"
@@ -132,7 +198,7 @@ def _run_eval_worker(cfg: dict[str, Any], timeout_s: int) -> dict[str, Any]:
         env = dict(os.environ)
         env.setdefault("ASCEND_SLOG_PRINT_TO_STDOUT", "0")
         proc = subprocess.Popen(
-            [sys.executable, "-m", "ascend_kernel_bench.eval", str(cfg_path)],
+            _worker_argv(cfg_path),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,

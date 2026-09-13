@@ -41,11 +41,22 @@ Use `--config path/to/eval.yaml` for a different configuration. The default valu
 
 The batch evaluator visits every complete sample directory sequentially and re-evaluates existing samples; it has no resume/skip flag. Re-evaluation overwrites each `eval_result.json` and rebuilds aggregate files. Preserve a copy of a run before measuring it on another device or with different settings.
 
+## Public evaluation entry points
+
+| Surface | Function | Use |
+| --- | --- | --- |
+| CLI | `scripts/evaluate.py` | Evaluate every complete sample in `runs/<name>/`. |
+| CLI | `scripts/run_single.py` | Generate one sample, then call `eval_sample`. |
+| Library | `evaluate_run(run_dir, *, hardware, config, device, measure_performance, on_sample=None)` | Same batch as the CLI, including aggregate JSON writes. |
+| Library | `eval_sample(task, sample_dir, *, hardware, config, device, measure_performance)` | Evaluate one sample directory. |
+
+`scripts/analyze.py` only reads `eval_results.json`. `scripts/_eval_worker.py`, `worker_main`, and `eval_sample_on_device` are internal to the isolated worker process.
+
 ## Worker and build lifecycle
 
 For each sample, the host checks that `custom_op.asc` and `model_new.py` exist and applies the [candidate static checks](../task_authoring.md#candidate-rules-and-checks). A static violation produces a failed result without launching the worker.
 
-An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. That worker calls `eval_device.eval_sample_on_device`. It builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. Results travel through a temporary JSON file rather than standard output.
+An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. The host starts `scripts/_eval_worker.py`, which bootstraps the checkout `src/` path and calls `eval_device.eval_sample_on_device`. It builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. Results travel through a temporary JSON file rather than standard output.
 
 The host allows `eval_timeout + 2 * build_timeout` seconds for the whole worker: 1,500 seconds with the defaults. There is no separate 300-second timer started after compilation. On an overall timeout, the host attempts to kill the worker's entire process group and records a failure.
 

@@ -25,9 +25,8 @@ from ascend_kernel_bench.cli_util import (
     load_eval_runtime,
     sample_status_label,
 )
-from ascend_kernel_bench.dataset import load_task
-from ascend_kernel_bench.eval import eval_sample
-from ascend_kernel_bench.score import compute_pass_at_k, summarize_eval_results
+from ascend_kernel_bench.eval import evaluate_run
+from ascend_kernel_bench.score import summarize_eval_results
 
 console = Console()
 
@@ -60,17 +59,11 @@ def main() -> None:
 
     with cli_progress(console) as progress:
         bar = progress.add_task("evaluating", total=len(samples))
-        for task_id, sample_id, sdir in samples:
+
+        def on_sample(
+            task_id: str, sample_id: int, result: dict[str, object]
+        ) -> None:
             progress.update(bar, description=f"{task_id} s{sample_id}")
-            task = load_task(task_id)
-            result = eval_sample(
-                task,
-                sdir,
-                hardware=hardware,
-                config=config,
-                device=args.device,
-                measure_performance=not args.no_perf,
-            )
             style, label = sample_status_label(result)
             progress.console.print(
                 f"  [{style}]{task_id} s{sample_id}: {label}[/{style}]"
@@ -81,9 +74,15 @@ def main() -> None:
                     progress.console.print(f"    {line}")
             progress.advance(bar)
 
-    results = rundir.collect_eval_results(run_dir)
-    rundir.write_eval_results(run_dir, results)
-    rundir.write_pass_at_k(run_dir, compute_pass_at_k(results))
+        results = evaluate_run(
+            run_dir,
+            hardware=hardware,
+            config=config,
+            device=args.device,
+            measure_performance=not args.no_perf,
+            on_sample=on_sample,
+        )
+
     console.print(f"wrote {run_dir / 'eval_results.json'}")
     summary = summarize_eval_results(results)
     sol = summary.get("mean_sol_score")

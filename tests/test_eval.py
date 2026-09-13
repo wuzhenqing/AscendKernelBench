@@ -1,17 +1,25 @@
 """Host-side evaluation helpers that do not require an NPU."""
 
+import sys
+
 import pytest
 
+import ascend_kernel_bench as akb
+from ascend_kernel_bench.config import load_eval_config, load_hardware_profile
 from ascend_kernel_bench.eval import (
     _read_worker_payload,
-    eval_protocol_metadata,
-    fail_result,
+    _worker_argv,
+    evaluate_run,
 )
 from ascend_kernel_bench.eval_device import (
     cpu_reference_inputs,
     exec_python_source,
 )
-from ascend_kernel_bench.eval_result import compiled_result
+from ascend_kernel_bench.eval_result import (
+    compiled_result,
+    eval_protocol_metadata,
+    fail_result,
+)
 from ascend_kernel_bench.runtime import npu_device_index
 
 
@@ -97,3 +105,78 @@ def test_cpu_reference_inputs_casts_floats() -> None:
     out = cpu_reference_inputs(raw, torch)
     assert out[0].dtype == torch.float32
     assert out[1].dtype == torch.int64
+
+
+def test_public_eval_exports() -> None:
+    assert "eval_sample" in akb.__all__
+    assert "evaluate_run" in akb.__all__
+    assert "worker_main" not in akb.__all__
+    assert akb.eval.__all__ == ["eval_sample", "evaluate_run"]
+
+
+def test_worker_argv_uses_repo_script(tmp_path) -> None:
+    cfg_path = tmp_path / "cfg.json"
+    argv = _worker_argv(cfg_path)
+    assert argv[0] == sys.executable
+    assert argv[1].endswith("_eval_worker.py")
+    assert "scripts" in argv[1]
+    assert argv[2] == str(cfg_path)
+    assert "-m" not in argv
+
+
+def test_evaluate_run_missing_dir(tmp_path) -> None:
+    hardware = load_hardware_profile("ascend910b2")
+    config = load_eval_config()
+    with pytest.raises(FileNotFoundError, match="run dir not found"):
+        evaluate_run(
+            tmp_path / "missing",
+            hardware=hardware,
+            config=config,
+            measure_performance=False,
+        )
+
+
+def test_evaluate_run_empty(tmp_path) -> None:
+    run_dir = tmp_path / "empty_run"
+    run_dir.mkdir()
+    hardware = load_hardware_profile("ascend910b2")
+    config = load_eval_config()
+    with pytest.raises(ValueError, match="no samples"):
+        evaluate_run(
+            run_dir,
+            hardware=hardware,
+            config=config,
+            measure_performance=False,
+        )
+
+
+def test_evaluate_run_static_failure(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    sample_dir = run_dir / "level1" / "19_ReLU" / "sample_0"
+    sample_dir.mkdir(parents=True)
+    (sample_dir / "custom_op.asc").write_text(
+        "// no kernel\n", encoding="utf-8"
+    )
+    (sample_dir / "model_new.py").write_text(
+        "class ModelNew:\n    pass\n", encoding="utf-8"
+    )
+    seen: list[tuple[str, int, bool]] = []
+
+    def on_sample(task_id: str, sample_id: int, result: dict) -> None:
+        seen.append((task_id, sample_id, bool(result.get("correctness"))))
+
+    results = evaluate_run(
+        run_dir,
+        hardware=load_hardware_profile("ascend910b2"),
+        config=load_eval_config(),
+        measure_performance=False,
+        on_sample=on_sample,
+    )
+    assert seen == [("level1/19_ReLU", 0, False)]
+    samples = results["level1/19_ReLU"]
+    assert samples[0]["correctness"] is False
+    assert samples[0]["compiled"] is False
+    assert samples[0]["sample_id"] == 0
+    assert (run_dir / "eval_results.json").is_file()
+    assert (run_dir / "pass_at_k_results.json").is_file()
+    assert (sample_dir / "eval_result.json").is_file()

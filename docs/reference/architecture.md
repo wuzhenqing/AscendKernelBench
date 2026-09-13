@@ -37,7 +37,7 @@ KernelBench task + hardware profile
 | `llm.py` | Endpoint requests, structured/fenced response handling, and basic deliverable validation. |
 | `rundir.py` | Run paths, generated files, per-sample collection, and atomic aggregate writes. |
 | `checker.py` | Heuristic Python AST/pattern checks and Ascend C source checks. |
-| `eval.py` | Host orchestration (static check, worker subprocess) and the worker entry point. |
+| `eval.py` | Public host API (`eval_sample`, `evaluate_run`) and isolated worker spawn. |
 | `eval_device.py` | Worker-side build, seeded correctness, NPU-event timing, and SOL attach. |
 | `eval_result.py` | KernelBench-compatible result payloads and protocol-snapshot metadata. |
 | `build.py` and `build_template/` | CMake build of `libcustom_op.so` and `torch.ops.load_library`. |
@@ -49,8 +49,20 @@ KernelBench task + hardware profile
 | `io_util.py` | Atomic JSON/YAML writes, JSON-object reads, and worker cfg loading. |
 | `baseline_worker.py` | Isolated eager-reference timing used by `scripts/baseline.py`. |
 | `score.py` | Sample speedups, `fast_p`, geometric mean speedup, pass@k, and mean SOL. |
+| `scripts/_eval_worker.py` | Internal worker process entry. Bootstraps `src/` and calls `worker_main`. |
 
 The Python modules are in [`src/ascend_kernel_bench/`](https://github.com/wuzhenqing/AscendKernelBench/tree/main/src/ascend_kernel_bench). The scripts under [`scripts/`](https://github.com/wuzhenqing/AscendKernelBench/tree/main/scripts) expose the workflows without a separate installed command-line executable.
+
+## Evaluation API layers
+
+| Layer | What to call | What not to call |
+| --- | --- | --- |
+| CLI | `scripts/evaluate.py`, `scripts/run_single.py`, `scripts/analyze.py` | `scripts/_eval_worker.py` |
+| Public library | `eval_sample`, `evaluate_run`, plus `load_eval_runtime`, `load_task`, rundir helpers, and `summarize_eval_results` / `compute_pass_at_k` | `eval_sample_on_device`, `worker_main` |
+| Internal host | `_run_eval_worker`, `_worker_argv`, static checks inside `eval_sample` | Device-side build and timing |
+| Internal worker | `worker_main` → `eval_sample_on_device` → `build_custom_op` / `load_custom_op` | Anything from the host process |
+
+`evaluate.py` is a thin argparse wrapper around `evaluate_run`. `run_single.py` calls `eval_sample` for one generated sample.
 
 ## Workflow entry points
 
@@ -84,7 +96,7 @@ These checks establish that response fields resemble the expected files; they do
 
 ## Evaluation boundary
 
-The host (`eval.py`) reads sample source and runs static checks before launching `python -m ascend_kernel_bench.eval`. A temporary config JSON carries the task source, sample path, profile architecture, and resolved evaluation settings into the worker. The worker calls `eval_device.eval_sample_on_device` and writes a JSON result file back.
+The host (`eval_sample`) reads sample source and runs static checks before launching `scripts/_eval_worker.py` with the same Python interpreter. That script adds the checkout `src/` directory to `sys.path`, so the worker does not require a pip-installed package. A temporary config JSON carries the task source, sample path, profile architecture, and resolved evaluation settings into the worker. The worker calls `eval_device.eval_sample_on_device` and writes a JSON result file back. `python -m ascend_kernel_bench.eval` remains as an internal fallback and is not a user entry point.
 
 NPU imports live inside worker/timing functions so source inspection and host-side utilities do not initialize an NPU runtime. The worker loads generated code, compiles native code, and uses the selected NPU. Its process is separate but has the invoking user's privileges; this is not a security sandbox.
 

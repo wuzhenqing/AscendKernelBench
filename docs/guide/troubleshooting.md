@@ -29,13 +29,9 @@ Read the metadata rather than relying on the CLI's `COMPILE-FAIL` / `WRONG` labe
 
 ### `No module named ascend_kernel_bench`
 
-Use the project's active Python environment and an editable installation from the repository root:
+User scripts and the isolated eval worker both bootstrap the checkout `src/` directory (`scripts/_bootstrap.py`, used by `scripts/evaluate.py` and `scripts/_eval_worker.py`). Run commands from a complete checkout so `scripts/_eval_worker.py` exists. An editable `pip install` is optional for that import path.
 
-```bash
-python -m pip install -e .
-```
-
-The scripts add `src/` to their own import path, but an evaluation worker starts a new interpreter with `python -m ascend_kernel_bench.eval`. It therefore needs an installed package or an explicitly configured `PYTHONPATH`; the parent script's temporary `sys.path` change is not enough.
+If the worker still cannot import the package, confirm `AKB_REPO_ROOT` (when set) points at that checkout, and that you are using the same Python interpreter that has the third-party dependencies installed.
 
 ### Missing `torch` or `torch_npu`
 

@@ -27,7 +27,7 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-Run the commands in these guides from the repository root, with the environment activated. The editable installation also makes the package available to evaluation worker subprocesses. Tasks, hardware profiles, scripts, and the build template are used directly from the checkout; no dataset submodule initialization is needed.
+Run the commands in these guides from the repository root, with the environment activated. Scripts and the isolated eval worker bootstrap the checkout `src/` directory, so an editable install is optional when you already have the third-party dependencies. Tasks, hardware profiles, scripts, and the build template are used directly from the checkout; no dataset submodule initialization is needed.
 
 The base installation provides the Python dependencies for generation and reporting. It does not install PyTorch, `torch_npu`, CANN, the NPU driver, or the native build toolchain.
 
