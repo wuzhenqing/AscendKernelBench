@@ -1,13 +1,14 @@
 #!/usr/bin/env python
-"""Batch evaluation of generated samples in runs/{run_name}/.
+"""Evaluate generated samples in a run.
 
 Each sample is evaluated in an isolated worker subprocess (build -> 5 seeded
 correctness trials -> NPU-Event timing vs the torch_npu eager reference).
 Writes per-sample eval_result.json, then aggregates eval_results.json and
 pass_at_k_results.json.
 
-Example:
-    python scripts/evaluate.py --run-name dev_run --device npu:0
+Examples:
+    python scripts/evaluate.py relu_demo
+    python scripts/evaluate.py relu_demo 1
 """
 
 from __future__ import annotations
@@ -22,40 +23,42 @@ from ascend_kernel_bench import rundir
 from ascend_kernel_bench.cli_util import (
     cli_progress,
     eval_result_lines,
-    load_eval_runtime,
+    print_eval_report,
     sample_status_label,
 )
 from ascend_kernel_bench.eval import evaluate_run
-from ascend_kernel_bench.score import summarize_eval_results
 
 console = Console()
 
 
 def main() -> None:
-    """Evaluate every generated sample in a run directory."""
+    """Evaluate complete samples in a run directory."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run-name", required=True)
-    parser.add_argument("--hardware", default=None)
-    parser.add_argument("--device", default="npu:0")
-    parser.add_argument("--no-perf", action="store_true")
-    parser.add_argument("--config", default=None)
+    parser.add_argument("run", help="run name under runs/, or an existing path")
+    parser.add_argument(
+        "level",
+        nargs="?",
+        type=int,
+        help="evaluate only this level (omit to evaluate every level)",
+    )
     args = parser.parse_args()
 
-    runtime = load_eval_runtime(
-        config_path=args.config,
-        hardware=args.hardware,
-    )
-    config, hardware = runtime.config, runtime.hardware
-    run_dir = rundir.RUNS_DIR / args.run_name
-    if not run_dir.is_dir():
-        sys.exit(f"run dir not found: {run_dir}")
+    try:
+        run_dir = rundir.resolve_run(args.run)
+    except FileNotFoundError as exc:
+        sys.exit(str(exc))
 
-    samples = list(rundir.iter_sample_dirs(run_dir))
+    samples = list(rundir.iter_sample_dirs(run_dir, level=args.level))
     if not samples:
+        if args.level is not None:
+            sys.exit(f"no samples in {run_dir} for level {args.level}")
         sys.exit(f"no samples in {run_dir}")
-    console.print(
-        f"evaluating {len(samples)} samples from {run_dir} on {args.device}"
-    )
+
+    if args.level is not None:
+        scope = f"level {args.level} of {run_dir}"
+    else:
+        scope = str(run_dir)
+    console.print(f"evaluating {len(samples)} samples from {scope}")
 
     with cli_progress(console) as progress:
         bar = progress.add_task("evaluating", total=len(samples))
@@ -74,24 +77,10 @@ def main() -> None:
                     progress.console.print(f"    {line}")
             progress.advance(bar)
 
-        results = evaluate_run(
-            run_dir,
-            hardware=hardware,
-            config=config,
-            device=args.device,
-            measure_performance=not args.no_perf,
-            on_sample=on_sample,
-        )
+        results = evaluate_run(run_dir, args.level, on_sample=on_sample)
 
     console.print(f"wrote {run_dir / 'eval_results.json'}")
-    summary = summarize_eval_results(results)
-    sol = summary.get("mean_sol_score")
-    sol_text = f"{sol:.3f}" if isinstance(sol, int | float) else "-"
-    console.print(
-        f"compiled {summary['compiled']}/{summary['total_samples']}, "
-        f"correct {summary['correct']}/{summary['total_samples']}, "
-        f"fast_p {summary['fast_p']}, mean SOL {sol_text}"
-    )
+    print_eval_report(console, run_dir.name, results)
 
 
 if __name__ == "__main__":

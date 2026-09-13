@@ -6,7 +6,7 @@ Start with the stage that failed: generation, static checking, compilation, modu
 
 You can generate candidates through a remote endpoint, inspect task and prompt source, run checks that do not import the NPU runtime, analyze existing JSON results, and build this documentation on macOS. Kernel compilation and evaluation require a Linux Ascend machine with the appropriate CANN, PyTorch, and `torch_npu` environment.
 
-`--no-perf` only disables timing. It still compiles the candidate and executes correctness trials on the NPU. The CPU reference fallback also requires a working NPU for the candidate; it is not a CPU-only evaluation mode.
+The CPU reference fallback also requires a working NPU for the candidate; it is not a CPU-only evaluation mode.
 
 ## Find the diagnostic files
 
@@ -127,7 +127,7 @@ Check runtime libraries in the evaluation process, the Python / PyTorch environm
 | `post-timing ... re-check failed` | The result failed a fresh-input check after timing. Investigate cached outputs, state changes, and numerical or memory errors. |
 | `excessive_speedup: true` | The measured speedup exceeded the configured review threshold. Inspect the implementation and timing conditions before using the number. |
 
-Missing runtime values are expected with `--no-perf`, and missing reference timing is expected with a CPU reference. Excessive-speedup results remain eligible for the correctness rate (`fast_0`) but are excluded from positive speedup thresholds and the geometric mean.
+Missing reference timing is expected with a CPU reference. Excessive-speedup results remain eligible for the correctness rate (`fast_0`) but are excluded from positive speedup thresholds and the geometric mean.
 
 ### Timeouts and out-of-memory errors
 
@@ -139,7 +139,7 @@ Keep inference and evaluation on separate physical NPUs, and confirm that the be
 
 ### The evaluator exited with status zero, but samples failed
 
-The batch evaluator writes per-sample results and completes even when candidates are incorrect. Its process exit status is not an all-samples-passed signal. Read `eval_results.json` and the summary counts. The single-task `run_single.py` script returns a nonzero status for an incorrect result, but a correct result can still contain a timing error; inspect its metadata for performance claims.
+The batch evaluator writes per-sample results and completes even when candidates are incorrect. Its process exit status is not an all-samples-passed signal. Read `eval_results.json` and the summary printed at the end of `scripts/evaluate.py`. A correct result can still contain a timing error; inspect its metadata for performance claims.
 
 ## Reporting a reproducible issue
 

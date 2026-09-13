@@ -5,8 +5,8 @@ import sys
 import pytest
 
 import ascend_kernel_bench as akb
-from ascend_kernel_bench.config import load_eval_config, load_hardware_profile
 from ascend_kernel_bench.eval import (
+    _load_run_settings,
     _read_worker_payload,
     _worker_argv,
     evaluate_run,
@@ -20,6 +20,7 @@ from ascend_kernel_bench.eval_result import (
     eval_protocol_metadata,
     fail_result,
 )
+from ascend_kernel_bench.io_util import write_json_atomic
 from ascend_kernel_bench.runtime import npu_device_index
 
 
@@ -108,10 +109,11 @@ def test_cpu_reference_inputs_casts_floats() -> None:
 
 
 def test_public_eval_exports() -> None:
-    assert "eval_sample" in akb.__all__
     assert "evaluate_run" in akb.__all__
+    assert "eval_sample" not in akb.__all__
     assert "worker_main" not in akb.__all__
-    assert akb.eval.__all__ == ["eval_sample", "evaluate_run"]
+    assert akb.eval.__all__ == ["evaluate_run"]
+    assert not hasattr(akb, "eval_sample")
 
 
 def test_worker_argv_uses_repo_script(tmp_path) -> None:
@@ -125,29 +127,15 @@ def test_worker_argv_uses_repo_script(tmp_path) -> None:
 
 
 def test_evaluate_run_missing_dir(tmp_path) -> None:
-    hardware = load_hardware_profile("ascend910b2")
-    config = load_eval_config()
     with pytest.raises(FileNotFoundError, match="run dir not found"):
-        evaluate_run(
-            tmp_path / "missing",
-            hardware=hardware,
-            config=config,
-            measure_performance=False,
-        )
+        evaluate_run(tmp_path / "missing")
 
 
 def test_evaluate_run_empty(tmp_path) -> None:
     run_dir = tmp_path / "empty_run"
     run_dir.mkdir()
-    hardware = load_hardware_profile("ascend910b2")
-    config = load_eval_config()
     with pytest.raises(ValueError, match="no samples"):
-        evaluate_run(
-            run_dir,
-            hardware=hardware,
-            config=config,
-            measure_performance=False,
-        )
+        evaluate_run(run_dir)
 
 
 def test_evaluate_run_static_failure(tmp_path) -> None:
@@ -165,13 +153,7 @@ def test_evaluate_run_static_failure(tmp_path) -> None:
     def on_sample(task_id: str, sample_id: int, result: dict) -> None:
         seen.append((task_id, sample_id, bool(result.get("correctness"))))
 
-    results = evaluate_run(
-        run_dir,
-        hardware=load_hardware_profile("ascend910b2"),
-        config=load_eval_config(),
-        measure_performance=False,
-        on_sample=on_sample,
-    )
+    results = evaluate_run(run_dir, on_sample=on_sample)
     assert seen == [("level1/19_ReLU", 0, False)]
     samples = results["level1/19_ReLU"]
     assert samples[0]["correctness"] is False
@@ -180,3 +162,68 @@ def test_evaluate_run_static_failure(tmp_path) -> None:
     assert (run_dir / "eval_results.json").is_file()
     assert (run_dir / "pass_at_k_results.json").is_file()
     assert (sample_dir / "eval_result.json").is_file()
+
+
+def _write_static_fail_sample(run_dir, task_id: str) -> None:
+    sample_dir = run_dir / task_id / "sample_0"
+    sample_dir.mkdir(parents=True)
+    (sample_dir / "custom_op.asc").write_text(
+        "// no kernel\n", encoding="utf-8"
+    )
+    (sample_dir / "model_new.py").write_text(
+        "class ModelNew:\n    pass\n", encoding="utf-8"
+    )
+
+
+def test_evaluate_run_resolves_name(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("ascend_kernel_bench.rundir.RUNS_DIR", tmp_path)
+    run_dir = tmp_path / "named_run"
+    _write_static_fail_sample(run_dir, "level1/19_ReLU")
+    results = evaluate_run("named_run")
+    assert "level1/19_ReLU" in results
+
+
+def test_evaluate_run_level_filter_preserves_other_results(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    _write_static_fail_sample(run_dir, "level1/19_ReLU")
+    other = run_dir / "level2" / "1_MLP" / "sample_0"
+    other.mkdir(parents=True)
+    (other / "custom_op.asc").write_text("// no kernel\n", encoding="utf-8")
+    (other / "model_new.py").write_text("class ModelNew:\n    pass\n")
+    write_json_atomic(
+        other / "eval_result.json",
+        {"compiled": True, "correctness": True, "runtime": None},
+    )
+    seen: list[str] = []
+
+    def on_sample(task_id: str, sample_id: int, result: dict) -> None:
+        seen.append(task_id)
+
+    results = evaluate_run(run_dir, 1, on_sample=on_sample)
+    assert seen == ["level1/19_ReLU"]
+    assert results["level1/19_ReLU"][0]["compiled"] is False
+    assert results["level2/1_MLP"][0]["correctness"] is True
+
+
+def test_evaluate_run_missing_level(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    _write_static_fail_sample(run_dir, "level1/19_ReLU")
+    with pytest.raises(ValueError, match="level 2"):
+        evaluate_run(run_dir, 2)
+
+
+def test_load_run_settings_reads_generation_hardware(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "generation_config.yaml").write_text(
+        "hardware: ascend950pr\n", encoding="utf-8"
+    )
+    _, hardware = _load_run_settings(run_dir)
+    assert hardware.name == "ascend950pr"
+
+
+def test_load_run_settings_defaults_without_generation_config(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    config, hardware = _load_run_settings(run_dir)
+    assert hardware.name == config.hardware

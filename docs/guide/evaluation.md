@@ -1,6 +1,6 @@
 # Evaluation protocol
 
-Evaluation builds a generated Ascend C extension, checks it against the reference task, and optionally measures NPU latency. It requires a configured Ascend machine with CANN, PyTorch, and `torch_npu`. macOS can prepare samples and inspect existing results, but it cannot execute this protocol on an Ascend NPU.
+Evaluation builds a generated Ascend C extension, checks it against the reference task, and measures NPU latency. It requires a configured Ascend machine with CANN, PyTorch, and `torch_npu`. macOS can prepare samples and inspect existing results, but it cannot execute this protocol on an Ascend NPU.
 
 This page describes the current implementation. No NPU evaluation was performed as part of the documentation update.
 
@@ -9,27 +9,17 @@ This page describes the current implementation. No NPU evaluation was performed 
 After generation has populated `runs/my_run/`, run:
 
 ```bash
-python scripts/evaluate.py \
-  --run-name my_run \
-  --hardware ascend910b2 \
-  --device npu:0
+python scripts/evaluate.py my_run
+python scripts/evaluate.py my_run 1
 ```
 
-The hardware profile selects the compiler architecture; `--device` selects the runtime device. Choose both to match the target machine. The profile is not automatic hardware detection.
+The first command evaluates every complete sample in the run. The second evaluates only `level1/`. Hardware comes from the run's `generation_config.yaml` when present, otherwise from `configs/eval_default.yaml`. The worker always uses `npu:0`; pick a physical card with `ASCEND_RT_VISIBLE_DEVICES`. Evaluation always compiles, checks correctness, and measures latency.
 
-To build and check correctness without measuring latency:
-
-```bash
-python scripts/evaluate.py --run-name my_run --device npu:0 --no-perf
-```
-
-`--no-perf` still compiles and executes the candidate on the NPU. It is not a CPU or macOS evaluation mode. It also skips the post-timing fresh-input check because no timing phase runs.
-
-Use `--config path/to/eval.yaml` for a different configuration. The default values are:
+The default protocol values are:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `hardware` | `ascend910b2` | Hardware profile unless overridden by `--hardware`. |
+| `hardware` | `ascend910b2` | Hardware profile unless the run recorded another name. |
 | `seed` | `42` | Base seed for initialization, correctness seed generation, and timing. |
 | `precision` | `fp32` | Floating-point input/model dtype. |
 | `num_correct_trials` | `5` | All initial correctness trials must pass. |
@@ -39,18 +29,16 @@ Use `--config path/to/eval.yaml` for a different configuration. The default valu
 | `build_timeout` | `600` seconds | Separate budget for CMake configure and CMake build. |
 | `eval_timeout` | `300` seconds | Additional time included in the overall worker budget. |
 
-The batch evaluator visits every complete sample directory sequentially and re-evaluates existing samples; it has no resume/skip flag. Re-evaluation overwrites each `eval_result.json` and rebuilds aggregate files. Preserve a copy of a run before measuring it on another device or with different settings.
+The batch evaluator visits complete sample directories sequentially and re-evaluates them; it has no resume/skip flag. An optional level argument limits the visit to that level. Re-evaluation overwrites those `eval_result.json` files and rebuilds aggregate files from every stored result in the run. Preserve a copy of a run before measuring it on another device or with different settings.
 
 ## Public evaluation entry points
 
 | Surface | Function | Use |
 | --- | --- | --- |
-| CLI | `scripts/evaluate.py` | Evaluate every complete sample in `runs/<name>/`. |
-| CLI | `scripts/run_single.py` | Generate one sample, then call `eval_sample`. |
-| Library | `evaluate_run(run_dir, *, hardware, config, device, measure_performance, on_sample=None)` | Same batch as the CLI, including aggregate JSON writes. |
-| Library | `eval_sample(task, sample_dir, *, hardware, config, device, measure_performance)` | Evaluate one sample directory. |
+| CLI | `scripts/evaluate.py <run> [level]` | Evaluate complete samples in `runs/<name>/`, optionally one level. |
+| Library | `evaluate_run(run, level=None)` | Same batch as the CLI, including aggregate JSON writes. |
 
-`scripts/analyze.py` only reads `eval_results.json`. `scripts/_eval_worker.py`, `worker_main`, and `eval_sample_on_device` are internal to the isolated worker process.
+`scripts/analyze.py <run>` only reads `eval_results.json`. `scripts/_eval_worker.py`, `worker_main`, `eval_sample`, and `eval_sample_on_device` are internal.
 
 ## Worker and build lifecycle
 
@@ -147,10 +135,7 @@ When both mean runtimes are available, a speedup strictly above `excessive_speed
 On the Ascend machine:
 
 ```bash
-python scripts/baseline.py \
-  --task level1/19_ReLU \
-  --hardware ascend910b2 \
-  --device npu:0
+python scripts/baseline.py --task level1/19_ReLU --hardware ascend910b2 --device npu:0
 ```
 
 The archive is `results/baseline/{hardware}/{task_name}.json`. Supported references include timing statistics, `supported_on_npu: true`, and `timing_fresh_inputs`. Reference failures inside the measurement block produce `supported_on_npu: false` with an error string; worker-level failures are printed and may leave no archive.

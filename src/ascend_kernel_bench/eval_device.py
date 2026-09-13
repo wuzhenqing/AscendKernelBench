@@ -1,6 +1,6 @@
 """Worker-side build, correctness, and timing for one sample.
 
-Runs inside the isolated subprocess started by :func:`eval.eval_sample`.
+Runs inside the isolated subprocess started by :func:`eval.evaluate_run`.
 See docs/guide/evaluation.md for the protocol this module implements.
 """
 

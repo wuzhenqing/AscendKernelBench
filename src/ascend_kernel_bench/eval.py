@@ -1,8 +1,8 @@
-"""Isolated evaluation of one generated Ascend C sample.
+"""Isolated evaluation of generated Ascend C samples.
 
-Public host entry points are :func:`eval_sample` and :func:`evaluate_run`.
-Static check, then build, correctness, and timing run in a worker
-subprocess. See docs/guide/evaluation.md for the evaluation protocol.
+The public host entry point is :func:`evaluate_run`. Static check, then
+build, correctness, and timing run in a worker subprocess. See
+docs/guide/evaluation.md for the evaluation protocol.
 """
 
 from __future__ import annotations
@@ -21,7 +21,12 @@ from typing import Any
 from . import rundir
 from ._paths import REPO_ROOT
 from .checker import check_custom_op_asc, check_model_new
-from .config import EvalConfig, HardwareProfile
+from .config import (
+    EvalConfig,
+    HardwareProfile,
+    load_eval_config,
+    load_hardware_profile,
+)
 from .dataset import Task, load_task
 from .eval_device import eval_sample_on_device
 from .eval_result import fail_result
@@ -35,7 +40,6 @@ from .score import compute_pass_at_k
 from .timing import l2_clear_bytes
 
 __all__ = [
-    "eval_sample",
     "evaluate_run",
 ]
 
@@ -49,14 +53,19 @@ def _persist_eval_result(
     return result
 
 
+def _load_run_settings(run_dir: Path) -> tuple[EvalConfig, HardwareProfile]:
+    """Load the default protocol and the hardware recorded for ``run_dir``."""
+    config = load_eval_config()
+    hw_name = rundir.generation_hardware_name(run_dir) or config.hardware
+    return config, load_hardware_profile(hw_name)
+
+
 def eval_sample(
     task: Task,
     sample_dir: Path,
     *,
     hardware: HardwareProfile,
     config: EvalConfig,
-    device: str = "npu:0",
-    measure_performance: bool = True,
 ) -> dict[str, Any]:
     """Host entry: static check, then isolated worker subprocess.
 
@@ -95,8 +104,8 @@ def eval_sample(
             "sample_dir": str(sample_dir),
             "cmake_arch": hardware.cmake_arch,
             "hardware_name": hardware.name,
-            "device": device,
-            "measure_performance": measure_performance,
+            "device": "npu:0",
+            "measure_performance": True,
             "seed": config.seed,
             "num_correct_trials": config.num_correct_trials,
             "num_perf_trials": config.num_perf_trials,
@@ -115,51 +124,47 @@ def eval_sample(
 
 
 def evaluate_run(
-    run_dir: Path,
+    run: str | Path,
+    level: int | None = None,
     *,
-    hardware: HardwareProfile,
-    config: EvalConfig,
-    device: str = "npu:0",
-    measure_performance: bool = True,
     on_sample: Callable[[str, int, dict[str, Any]], None] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Evaluate every complete sample in ``run_dir`` and write aggregates.
+    """Evaluate complete samples in a run and write aggregates.
 
-    Each sample is checked and isolated through :func:`eval_sample`. After
-    the batch finishes, ``eval_results.json`` and ``pass_at_k_results.json``
-    are written next to the samples.
+    Each selected sample is checked and isolated through
+    :func:`eval_sample`. After the batch finishes, ``eval_results.json``
+    and ``pass_at_k_results.json`` are rewritten from every stored
+    per-sample result in the run, including levels that were not
+    re-evaluated.
 
     Args:
-        run_dir: Existing run directory under ``runs/``.
-        hardware: Compilation target and result hardware label.
-        config: Evaluation protocol settings.
-        device: NPU device string forwarded to each worker.
-        measure_performance: When False, skip timing after correctness.
+        run: Run directory name under ``runs/``, or an existing path.
+        level: When set, only evaluate samples under ``level{level}/``.
         on_sample: Optional ``(task_id, sample_id, result)`` callback
-            invoked after each sample. Used by the CLI for progress.
+            invoked after each evaluated sample. Used by the CLI for
+            progress.
 
     Returns:
         KernelBench-compatible mapping of task id to sample result dicts.
 
     Raises:
-        FileNotFoundError: If ``run_dir`` does not exist.
-        ValueError: If the run contains no complete samples.
+        FileNotFoundError: If the run directory does not exist.
+        ValueError: If the selection contains no complete samples.
     """
-    run_dir = Path(run_dir)
-    if not run_dir.is_dir():
-        raise FileNotFoundError(f"run dir not found: {run_dir}")
-    samples = list(rundir.iter_sample_dirs(run_dir))
+    run_dir = rundir.resolve_run(run)
+    samples = list(rundir.iter_sample_dirs(run_dir, level=level))
     if not samples:
+        if level is not None:
+            raise ValueError(f"no samples in {run_dir} for level {level}")
         raise ValueError(f"no samples in {run_dir}")
 
+    config, hardware = _load_run_settings(run_dir)
     for task_id, sample_id, sample_path in samples:
         result = eval_sample(
             load_task(task_id),
             sample_path,
             hardware=hardware,
             config=config,
-            device=device,
-            measure_performance=measure_performance,
         )
         if on_sample is not None:
             on_sample(task_id, sample_id, result)

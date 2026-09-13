@@ -13,7 +13,7 @@ AscendKernelBench separates code generation from operator evaluation. You can in
 | Compile `custom_op.asc` into `libcustom_op.so` | No, requires the Ascend toolchain | Yes, with the required toolchain |
 | Check candidate correctness and measure performance | No | Yes |
 
-The evaluator has a CPU **reference** fallback for tasks that the NPU reference cannot execute. The candidate still runs on the NPU; this is not a CPU evaluation mode. Similarly, `--no-perf` skips timing but still builds and executes the candidate on an NPU.
+The evaluator has a CPU **reference** fallback for tasks that the NPU reference cannot execute. The candidate still runs on the NPU; this is not a CPU evaluation mode.
 
 ## Install from a checkout
 

@@ -53,10 +53,10 @@ not implement an automatic compile-error repair agent.
 | Analyze saved `eval_results.json` | Yes | Yes |
 | Compile, check, or time a kernel | No | Required |
 
-**Neither `--no-perf` nor CPU-reference fallback enables evaluation on a
-laptop.** Candidates always run on an Ascend NPU. CPU fallback changes
-only the reference used for correctness; those samples have no NPU
-speedup and no SOL score.
+**CPU-reference fallback does not enable evaluation on a laptop.**
+Candidates always run on an Ascend NPU. CPU fallback changes only the
+reference used for correctness; those samples have no NPU speedup and
+no SOL score.
 
 ## Quick start
 
@@ -102,12 +102,8 @@ python scripts/generate.py \
 Evaluate and report (Ascend host, exclusive device):
 
 ```bash
-ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py \
-  --run-name relu_demo \
-  --hardware ascend910b2 \
-  --device npu:0
-
-python scripts/analyze.py --run-name relu_demo
+ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py relu_demo
+python scripts/analyze.py relu_demo
 ```
 
 ## Command-line tools
@@ -115,8 +111,7 @@ python scripts/analyze.py --run-name relu_demo
 | Script | Purpose |
 | --- | --- |
 | `scripts/generate.py` | Sample an OpenAI-compatible model; write sources under `runs/` |
-| `scripts/evaluate.py` | Build, check, and time every sample in a run |
-| `scripts/run_single.py` | One-task generate + evaluate loop |
+| `scripts/evaluate.py` | Build, check, and time a run (`run` and optional `level`) |
 | `scripts/analyze.py` | Print `fast_p`, `pass@k`, geomean speedup, mean SOL |
 | `scripts/baseline.py` | Archive live `torch_npu` eager timings (not the eval denominator) |
 

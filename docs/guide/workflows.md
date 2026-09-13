@@ -66,40 +66,20 @@ A newly generated run consists of portable source and text files. Native `custom
 On the Linux Ascend machine:
 
 ```bash
-python scripts/evaluate.py \
-  --run-name activations-10 \
-  --hardware ascend910b2 \
-  --device npu:0
+python scripts/evaluate.py activations-10
+python scripts/evaluate.py activations-10 1
 ```
 
-The command evaluates every sample directory containing both required source files. Each sample passes through static checking, compilation, seeded correctness trials, and timing in an isolated worker process. The batch runs sequentially on the selected device.
+The command evaluates every complete sample directory, or only one level when the second argument is given. Each selected sample passes through static checking, compilation, seeded correctness trials, and timing in an isolated worker process. The batch runs sequentially on `npu:0`. On a multi-card machine, set `ASCEND_RT_VISIBLE_DEVICES` so that card appears as `npu:0`. Hardware is read from the run's `generation_config.yaml` when present.
 
-To check correctness without timing:
-
-```bash
-python scripts/evaluate.py \
-  --run-name activations-10 \
-  --hardware ascend910b2 \
-  --device npu:0 \
-  --no-perf
-```
-
-This still needs the Ascend compiler and NPU. It produces no runtime or speedup measurement.
-
-> **Select the hardware again.** Evaluation does not load
-> `generation_config.yaml` to select hardware. Pass the intended `--hardware`,
-> or use an evaluation configuration containing the same hardware profile.
-> Otherwise, the evaluator uses the current configuration's default,
-> `ascend910b2`.
-
-The evaluator rebuilds and reevaluates samples on each invocation, overwrites their `eval_result.json` files, and rewrites the run's aggregate files. Save a separate copy of a run before comparing repeated evaluations. Archived baselines are not read by this command: it measures the reference in the same worker as the candidate.
+Evaluating one level rewrites that level's per-sample results and then rebuilds the run aggregates from every stored `eval_result.json`, so other levels are not erased. The evaluator rebuilds selected samples on each invocation. Save a separate copy of a run before comparing repeated evaluations. Archived baselines are not read by this command: it measures the reference in the same worker as the candidate.
 
 ## Read the report anywhere
 
 After evaluation completes, run:
 
 ```bash
-python scripts/analyze.py --run-name activations-10
+python scripts/analyze.py activations-10
 ```
 
 The report shows compile and correctness counts, NPU/CPU-reference coverage, flagged excessive speedups, `fast_p`, geometric mean speedup, mean roofline SOL score when present, `pass@k`, and per-problem detail. Analysis reads the aggregate `eval_results.json`; it does not evaluate source files or refresh that aggregate from per-sample results.
@@ -107,21 +87,6 @@ The report shows compile and correctness counts, NPU/CPU-reference coverage, fla
 You can copy the run back to macOS for analysis. For reporting alone, `runs/activations-10/eval_results.json` is sufficient. Keep the full run if you also want to inspect generated code or compilation diagnostics.
 
 Ten successfully saved and evaluated samples per task allow `pass@1`, `pass@5`, and `pass@10` to be reported. Missing generations are not represented as failed evaluation samples. Check the generation command's final saved/expected count before interpreting scores: partially failed generation batches can exit successfully. See [results and metrics](results.md) for metric denominators and eligibility rules.
-
-## Run one task end to end
-
-With the LLM endpoint and Ascend environment available on the same machine:
-
-```bash
-python scripts/run_single.py \
-  --task level1/19_ReLU \
-  --model "$AKB_MODEL" \
-  --hardware ascend910b2 \
-  --device npu:0 \
-  --run-name relu-end-to-end
-```
-
-This generates one sample, evaluates it, and writes `eval_results.json`. It exits with status 0 only when the sample is correct. Unlike `evaluate.py`, it does not write `pass_at_k_results.json`; `analyze.py` can still calculate and display the available metrics from the aggregate.
 
 ## Archive reference baselines
 

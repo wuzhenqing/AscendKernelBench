@@ -13,6 +13,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from ._paths import RUNS_DIR
 from .io_util import read_json_object, write_json_atomic, write_yaml_atomic
 from .llm import AscendCGeneration
@@ -35,6 +37,57 @@ def create_run(run_name: str, generation_config: dict) -> Path:
     if generation_config:
         write_yaml_atomic(cfg_path, generation_config)
     return run_dir
+
+
+def resolve_run(run: str | Path) -> Path:
+    """Resolve a run name or directory path to an existing run directory.
+
+    An existing directory is used as-is. A bare name is resolved under
+    :data:`RUNS_DIR`.
+
+    Args:
+        run: Run directory name or filesystem path.
+
+    Returns:
+        Absolute path of the run directory.
+
+    Raises:
+        FileNotFoundError: If the resolved path is not a directory.
+    """
+    path = Path(run)
+    if path.is_dir():
+        return path.resolve()
+    if path.is_absolute() or len(path.parts) > 1:
+        raise FileNotFoundError(f"run dir not found: {path}")
+    named = RUNS_DIR / path.name
+    if named.is_dir():
+        return named
+    raise FileNotFoundError(f"run dir not found: {named}")
+
+
+def generation_hardware_name(run_dir: Path) -> str | None:
+    """Return the hardware profile name recorded at generation time.
+
+    Args:
+        run_dir: Run directory that may contain ``generation_config.yaml``.
+
+    Returns:
+        Hardware profile name, or ``None`` when the file is missing or
+        has no usable ``hardware`` field.
+    """
+    path = Path(run_dir) / "generation_config.yaml"
+    if not path.is_file():
+        return None
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    name = loaded.get("hardware")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None
 
 
 def sample_dir(run_dir: Path, task_id: str, sample_id: int) -> Path:
@@ -89,7 +142,9 @@ def save_sample(
     return out_dir
 
 
-def iter_sample_dirs(run_dir: Path) -> Iterator[tuple[str, int, Path]]:
+def iter_sample_dirs(
+    run_dir: Path, level: int | None = None
+) -> Iterator[tuple[str, int, Path]]:
     """Yield ``(task_id, sample_id, dir)`` for every complete sample.
 
     A sample is complete when both ``custom_op.asc`` and ``model_new.py``
@@ -97,11 +152,13 @@ def iter_sample_dirs(run_dir: Path) -> Iterator[tuple[str, int, Path]]:
 
     Args:
         run_dir: Run directory under ``runs/``.
+        level: When set, only visit ``level{level}/`` task directories.
 
     Yields:
         Task id, sample index, and directory path.
     """
-    for task_dir in sorted(Path(run_dir).glob("level*/*")):
+    pattern = f"level{level}/*" if level is not None else "level*/*"
+    for task_dir in sorted(Path(run_dir).glob(pattern)):
         if not task_dir.is_dir():
             continue
         task_id = f"{task_dir.parent.name}/{task_dir.name}"

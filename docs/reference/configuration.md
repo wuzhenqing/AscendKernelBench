@@ -4,19 +4,19 @@ Evaluation settings live in `configs/eval_default.yaml`. Hardware descriptions l
 
 ## Precedence and loading
 
-1. A supplied CLI flag overrides the corresponding configuration setting.
-2. `--config PATH` loads that YAML file; otherwise, the repository's default file is loaded.
+1. A supplied generation or baseline CLI flag overrides the corresponding configuration setting.
+2. `--config PATH` on those scripts loads that YAML file; otherwise, the repository's default file is loaded. Evaluation does not take `--config`.
 3. Omitted top-level fields receive `EvalConfig` dataclass defaults. Generation scripts apply their own defaults for missing `generation` keys.
 
 A custom YAML file **replaces** the default file; the loader does not merge files. Nested mappings such as `tolerances` and `generation` are not recursively merged with the default YAML. Unknown top-level keys are silently ignored, so a misspelled key may appear to work while leaving the default in effect. The loader does not provide comprehensive value/range validation.
 
-CLI settings are not automatically recovered from an existing run's `generation_config.yaml`. In particular, select the correct hardware again when evaluating a saved run.
+Evaluation reads the `hardware` field from an existing run's `generation_config.yaml` when present. Other evaluation protocol values always come from `configs/eval_default.yaml`. Generation scripts still accept `--config` and `--hardware`.
 
 ## Evaluation settings
 
 | Key | Default | Behavior |
 | --- | --- | --- |
-| `hardware` | `ascend910b2` | Hardware profile name, unless overridden by `--hardware`. |
+| `hardware` | `ascend910b2` | Default hardware profile name. Evaluation prefers the name recorded in the run's `generation_config.yaml`. Generation still accepts `--hardware`. |
 | `num_correct_trials` | `5` | Number of seeded correctness trials. Every trial must pass. |
 | `seed` | `42` | Seed used for model initialization, correctness seed generation, and performance inputs. |
 | `precision` | `fp32` | Floating-point precision. Use `fp32`, `fp16`, or `bf16`. Integer and Boolean tensors retain their types. |
@@ -48,11 +48,11 @@ These are nested under `generation`:
 
 | Key | Default | Used by |
 | --- | --- | --- |
-| `model` | `deepseek-v4-flash` | `generate.py`, `run_single.py` |
-| `temperature` | `0.0` | `generate.py`, `run_single.py` |
-| `max_tokens` | `16384` | `generate.py`, `run_single.py`; no CLI override |
-| `num_samples` | `1` | `generate.py` only |
-| `prompt_mode` | `one_shot` | `generate.py`, `run_single.py` |
+| `model` | `deepseek-v4-flash` | `generate.py` |
+| `temperature` | `0.0` | `generate.py` |
+| `max_tokens` | `16384` | `generate.py`; no CLI override |
+| `num_samples` | `1` | `generate.py` |
+| `prompt_mode` | `one_shot` | `generate.py` |
 
 The model name is passed to your endpoint. Set it to a model your service supports. `zero_shot` omits examples, `one_shot` uses the first bundled example, and `few_shot` uses all bundled examples. The repository currently ships two examples (elementwise add and LeakyReLU).
 
@@ -80,7 +80,7 @@ generation:
   prompt_mode: one_shot
 ```
 
-Use the same configuration explicitly for generation and evaluation:
+Use a custom YAML for generation. Evaluation loads `configs/eval_default.yaml` and the hardware name recorded in the run:
 
 ```bash
 python scripts/generate.py \
@@ -88,11 +88,8 @@ python scripts/generate.py \
   --config configs/relu-experiment.yaml \
   --run-name relu-experiment
 
-# Run on the Ascend host after transferring the run and configuration.
-python scripts/evaluate.py \
-  --run-name relu-experiment \
-  --config configs/relu-experiment.yaml \
-  --device npu:0
+# Run on the Ascend host after transferring the run.
+python scripts/evaluate.py relu-experiment
 ```
 
 ## Hardware profiles
@@ -104,7 +101,7 @@ The supplied files describe these targets:
 | `ascend910b2` | `Ascend910B2` | `dav-2201` | Default profile in this repository. Validate against the machine and installed toolchain. |
 | `ascend950pr` | `Ascend950PR` | `dav-3510` | Reserved profile; its file explicitly requires specification validation before use. |
 
-These are configuration values, not automatic hardware detection or a claim that every target has passed validation. Selecting a profile does not change the NPU exposed by `--device`.
+These are configuration values, not automatic hardware detection or a claim that every target has passed validation. Selecting a profile does not change the NPU exposed to the process. Evaluation always uses `npu:0`; set `ASCEND_RT_VISIBLE_DEVICES` to choose a physical card.
 
 | Profile field | Required | Meaning |
 | --- | --- | --- |
@@ -133,6 +130,7 @@ Pass a custom profile with `--hardware configs/hardware/my-device.yaml`, or save
 | `AKB_REPO_ROOT` | Override the root used for configs, tasks, build templates, results, and runs. Set it before starting Python. |
 | `AKB_ENABLE_CCACHE` | When set to `1` / `true` / `yes` / `on`, the ACLNN CMake configure step receives `-DENABLE_CCACHE=ON`. |
 | `ASCEND_SLOG_PRINT_TO_STDOUT` | The build/evaluation code defaults this to `0` in child environments when it is unset, to reduce runtime log output. |
+| `ASCEND_RT_VISIBLE_DEVICES` | Restrict which physical NPUs the process can see. Evaluation always addresses `npu:0` inside that visible set. |
 
 If the selected CANN environment script exists, the build helper sources it through Bash and caches the resulting environment for that process. If it does not exist, the helper uses the current environment. Source the appropriate CANN script in your shell before running the evaluator so Python imports and worker startup can also use it.
 

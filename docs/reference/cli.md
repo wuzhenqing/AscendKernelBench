@@ -13,7 +13,7 @@ Run these scripts from the checkout root. Each script bootstraps the repository 
 | Run name | A directory name under `<repository>/runs/`. Use a simple, unique name such as `relu-demo`. There is no separate `--run-dir` option. |
 | `--hardware` | A profile name such as `ascend910b2`, or the path to an existing YAML file. |
 | `--config` | An evaluation YAML file. If omitted, loads `<repository>/configs/eval_default.yaml`. A relative path is resolved from the current working directory. |
-| `--device` | Device string, default `npu:0`. Device evaluation requires an Ascend NPU. |
+| `--device` | Device string used by generation-adjacent tools such as `baseline.py`, default `npu:0`. `evaluate.py` always uses `npu:0`; select a physical card with `ASCEND_RT_VISIBLE_DEVICES`. |
 
 All batch commands process items sequentially. They have no CLI options for parallel workers, resume, or skipping previously completed samples.
 
@@ -47,56 +47,23 @@ Generation errors are printed and the batch continues. The script exits with sta
 
 ## `scripts/evaluate.py`
 
-Build and evaluate every complete source pair found in an existing run. Requires the Ascend evaluation environment.
+Build, check, and time complete source pairs in an existing run. Requires the Ascend evaluation environment. There are no flags.
 
 ```bash
-python scripts/evaluate.py \
-  --run-name relu-10 \
-  --hardware ascend910b2 \
-  --device npu:0
+python scripts/evaluate.py relu-10
+python scripts/evaluate.py relu-10 1
 ```
 
-| Option | Default | Purpose |
+| Argument | Default | Purpose |
 | --- | --- | --- |
-| `--run-name NAME` | Required | Existing run under `runs/`. |
-| `--hardware NAME_OR_PATH` | `hardware` from configuration | Compilation target and result hardware label. |
-| `--device DEVICE` | `npu:0` | NPU device for each worker. |
-| `--no-perf` | Disabled | Skip performance timing; compilation and correctness checks still run. |
-| `--config PATH` | `configs/eval_default.yaml` | Evaluation protocol settings. |
+| `run` | Required | Run name under `runs/`, or an existing directory path. |
+| `level` | Every level in the run | Integer level to evaluate, for example `1`. |
 
-This command is a thin wrapper around `evaluate_run`. Embedding code should call that function (or `eval_sample` for one directory) instead of importing the script. This command has no `--task`, `--level`, `--sample-id`, or generation options. It discovers sample directories under `runs/<name>/level*/*/sample_*` that contain both `custom_op.asc` and `model_new.py`.
+This command is a thin wrapper around `evaluate_run`. Embedding code should call that function instead of importing the script. It does not accept a task, sample id, device, hardware, config, or performance-skip flag. Multi-card hosts set `ASCEND_RT_VISIBLE_DEVICES` so the chosen card appears as `npu:0`. Hardware is read from `generation_config.yaml` when present, otherwise from `configs/eval_default.yaml`.
 
-It writes per-sample `eval_result.json`, followed by the run's `eval_results.json` and `pass_at_k_results.json`. It does not infer hardware from the saved generation configuration. Existing evaluation results are replaced.
+It writes per-sample `eval_result.json`, then the run's `eval_results.json` and `pass_at_k_results.json`, and prints the same report as `analyze.py`. Evaluating one level overwrites that level's per-sample results and rebuilds aggregates from every stored result in the run.
 
-Missing runs or runs with no samples cause a nonzero exit. Individual compilation and correctness failures are recorded as results; a completed batch does not return a failing exit code merely because candidates failed. Inspect the result files when using this command in automation.
-
-## `scripts/run_single.py`
-
-Generate one sample and immediately build and evaluate it. Requires both an LLM endpoint and the Ascend environment.
-
-```bash
-python scripts/run_single.py \
-  --task level1/19_ReLU \
-  --model "$AKB_MODEL" \
-  --run-name relu-single
-```
-
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `--task TASK_ID` | Required | Exactly one task. |
-| `--model NAME` | Generation configuration | Endpoint model name. |
-| `--hardware NAME_OR_PATH` | `hardware` from configuration | Prompt hardware description and build target. |
-| `--device DEVICE` | `npu:0` | Evaluation device. |
-| `--run-name NAME` | `single_<task_file_stem>` | For the example task, `single_19_ReLU`. |
-| `--sample-id INTEGER` | `0` | Sample directory index. Use a nonnegative integer. |
-| `--prompt-mode MODE` | Generation configuration | `zero_shot`, `one_shot`, or `few_shot`. |
-| `--temperature FLOAT` | Generation configuration | Override sampling temperature. |
-| `--no-perf` | Disabled | Skip timing while retaining NPU correctness checks. |
-| `--config PATH` | `configs/eval_default.yaml` | Generation and evaluation settings. |
-
-Generation fallbacks match `generate.py`: model `deepseek-v4-flash`, prompt mode `one_shot`, temperature `0.0`, and maximum tokens `16384`. This script always generates one sample; it does not use `generation.num_samples`.
-
-The command writes source files, a per-sample result, and aggregate `eval_results.json`. It does not write `pass_at_k_results.json`. The exit status is 0 for a correct candidate and 1 for an incorrect or failed candidate; an unhandled generation/setup error also exits unsuccessfully.
+Missing runs or a selection with no samples cause a nonzero exit. Individual compilation and correctness failures are recorded as results; a completed batch does not return a failing exit code merely because candidates failed. Inspect the result files when using this command in automation.
 
 ## `scripts/baseline.py`
 
@@ -126,12 +93,12 @@ The hardware profile labels the archive; it does not change the physical device 
 Print aggregate and per-problem reports from existing results. Does not need an NPU or endpoint credentials.
 
 ```bash
-python scripts/analyze.py --run-name relu-10
+python scripts/analyze.py relu-10
 ```
 
-| Option | Default | Purpose |
+| Argument | Default | Purpose |
 | --- | --- | --- |
-| `--run-name NAME` | Required | Read `runs/<name>/eval_results.json`. |
+| `run` | Required | Run name under `runs/`, or an existing directory path. |
 
 The script recalculates metrics in memory and prints them, including `fast_p`, geometric-mean speedup, `pass@k`, and mean roofline SOL score when present. It writes no report files, does not collect per-sample results, and does not update `pass_at_k_results.json`. A missing aggregate file causes a nonzero exit.
 

@@ -82,10 +82,7 @@ For example, an operator might reserve physical devices 4–7 for inference and 
 
 ```bash
 # Run on the Linux Ascend evaluation host after preparing its environment.
-ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py \
-  --run-name endpoint_smoke \
-  --hardware ascend910b2 \
-  --device npu:0
+ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py endpoint_smoke
 ```
 
 Confirm the physical allocation and visible device mapping on your host. AscendKernelBench inherits `ASCEND_RT_VISIBLE_DEVICES` but does not check whether another process uses the same card. The batch evaluator processes samples sequentially; it is not a multi-device scheduler. You can also generate all samples first, stop the inference service, and evaluate afterward on an otherwise idle device.

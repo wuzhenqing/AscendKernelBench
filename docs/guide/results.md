@@ -3,7 +3,7 @@
 AscendKernelBench separates generation artifacts, per-sample evaluation results, and aggregate reports. You can inspect and analyze existing results on macOS without an NPU.
 
 ```bash
-python scripts/analyze.py --run-name my_run
+python scripts/analyze.py my_run
 ```
 
 This command reads `runs/my_run/eval_results.json` and prints headline metrics and per-problem details. It does not run evaluation, regenerate the aggregate from sample directories, or write a new report file.
@@ -30,7 +30,7 @@ runs/my_run/
 └── pass_at_k_results.json
 ```
 
-This is a representative layout, not a promise that every file exists. `response_raw.txt` is written when a raw response is available. Build artifacts/logs appear only after their stages run. `scripts/evaluate.py` writes both aggregate JSON files; `scripts/run_single.py` writes `eval_results.json` but does not write `pass_at_k_results.json`.
+This is a representative layout, not a promise that every file exists. `response_raw.txt` is written when a raw response is available. Build artifacts/logs appear only after their stages run. `scripts/evaluate.py` writes both aggregate JSON files.
 
 `generation_config.yaml` records selected generation settings and tasks. It does not record the entire resolved evaluation configuration, driver/CANN versions, repository revision, or device state. Preserve those separately for reproducible comparisons. Using an existing run name can overwrite generated files and configuration; re-evaluation overwrites results.
 
@@ -98,7 +98,7 @@ The following is an illustrative schema example, **not a measured result**:
 | --- | --- |
 | `sample_id` | Integer identifying a generated candidate within a task; added during aggregation. |
 | `compiled` | Build-stage status in normal execution. Early failures and worker failures can report `false`; this is not a complete compiler audit trail. |
-| `correctness` | Final correctness decision, including a post-timing check when timing is enabled. |
+| `correctness` | Final correctness decision, including a post-timing fresh-input check. |
 | `runtime` | Candidate mean NPU latency in milliseconds, or `null`. |
 | `runtime_stats` | Candidate timing statistics, or `null`. |
 | `ref_runtime` | Live NPU reference mean latency in milliseconds, or `null`. |
@@ -119,7 +119,6 @@ Missing latency is not zero latency. Typical cases include:
 | --- | --- |
 | Static/build failure | Incorrect; no timing. Inspect static violations or compiler logs. |
 | Initial correctness failure | Incorrect; timing is skipped. |
-| Correct with `--no-perf` | Correctness is available; both timing pairs are `null`. |
 | Correct with `reference: "cpu"` | Candidate timing may exist, but no NPU reference timing or speedup. |
 | Timing exception | Correctness may remain true after a successful post-timing check; timing can be absent or partial. |
 | Post-timing failure | Incorrect; already collected timing fields can still be present. |

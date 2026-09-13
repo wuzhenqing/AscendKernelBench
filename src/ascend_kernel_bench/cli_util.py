@@ -47,7 +47,7 @@ def resolve_generation_settings(
         num_samples: Optional ``--n-samples`` override.
 
     Returns:
-        Frozen settings used by ``generate.py`` and ``run_single.py``.
+        Frozen settings used by ``generate.py``.
     """
     gen_cfg = dict(config.generation)
     return GenerationSettings(
@@ -212,6 +212,83 @@ def cli_progress(console: Console) -> Progress:
         TimeElapsedColumn(),
         console=console,
     )
+
+
+def print_eval_report(
+    console: Console, run_name: str, results: dict[str, object]
+) -> None:
+    """Print the headline and per-problem evaluation tables.
+
+    Args:
+        console: Rich console that receives the tables.
+        run_name: Run directory name used in the title.
+        results: KernelBench-compatible aggregate mapping.
+    """
+    from rich.table import Table
+
+    from .score import (
+        compute_pass_at_k,
+        sample_speedup,
+        summarize_eval_results,
+    )
+
+    summary = summarize_eval_results(results)
+    pass_at_k = compute_pass_at_k(results)
+
+    table = Table(title=f"AscendKernelBench report: {run_name}")
+    table.add_column("metric", style="bold")
+    table.add_column("value", justify="right")
+    table.add_row("problems", str(summary["total_problems"]))
+    table.add_row("samples", str(summary["total_samples"]))
+    table.add_row(
+        "compiled",
+        f"{summary['compiled']} "
+        f"({summary['compiled'] / max(summary['total_samples'], 1):.1%})",
+    )
+    table.add_row("correct (fast_0 denominator)", str(summary["correct"]))
+    table.add_row("npu-reference samples", str(summary.get("npu_reference", 0)))
+    table.add_row("cpu-reference samples", str(summary.get("cpu_reference", 0)))
+    table.add_row(
+        "flagged excessive speedup",
+        str(summary.get("excessive_speedup", 0)),
+    )
+    for key, value in summary["fast_p"].items():
+        table.add_row(key, f"{value:.3f}")
+    table.add_row(
+        "geomean speedup (correct only)",
+        f"{summary['geometric_mean_speedup_correct_only']:.3f}",
+    )
+    sol = summary.get("mean_sol_score")
+    table.add_row(
+        "mean SOL score (roofline)",
+        f"{sol:.3f}" if isinstance(sol, int | float) else "-",
+    )
+    for key, value in pass_at_k["average"].items():
+        table.add_row(key, f"{value:.3f}")
+    console.print(table)
+
+    detail = Table(title="per-problem detail")
+    detail.add_column("problem", style="bold")
+    detail.add_column("samples", justify="right")
+    detail.add_column("compiled", justify="right")
+    detail.add_column("correct", justify="right")
+    detail.add_column("best speedup", justify="right")
+    for problem_id, samples in sorted(results.items()):
+        if not isinstance(samples, list):
+            continue
+        compiled = sum(1 for sample in samples if sample.get("compiled"))
+        correct = sum(1 for sample in samples if sample.get("correctness"))
+        speedups = [s for s in (sample_speedup(x) for x in samples) if s]
+        best = f"{max(speedups):.2f}x" if speedups else "-"
+        style = "green" if correct else ("yellow" if compiled else "red")
+        detail.add_row(
+            f"[{style}]{problem_id}[/{style}]",
+            str(len(samples)),
+            str(compiled),
+            str(correct),
+            best,
+        )
+    console.print(detail)
 
 
 def sample_status_label(result: dict[str, object]) -> tuple[str, str]:
