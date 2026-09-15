@@ -1,9 +1,13 @@
 """Prompt construction stays English and describes local ACLNN loading."""
 
+import pytest
+
 from ascend_kernel_bench.config import load_hardware_profile
 from ascend_kernel_bench.dataset import load_task
 from ascend_kernel_bench.prompt import (
     SYSTEM_PROMPT,
+    PromptBuilder,
+    PromptMode,
     build_prompt,
     load_examples,
 )
@@ -47,3 +51,18 @@ def test_few_shot_includes_both_examples() -> None:
     )
     assert "001_elementwise_add" in prompt
     assert "002_leaky_relu" in prompt
+
+
+def test_prompt_builder_matches_build_prompt() -> None:
+    task = load_task("level1/19_ReLU")
+    hardware = load_hardware_profile("ascend910b2")
+    built = PromptBuilder(task, hardware).build(PromptMode.ONE_SHOT)
+    assert built == build_prompt(task, hardware, mode="one_shot")
+
+
+def test_unknown_prompt_mode() -> None:
+    with pytest.raises(ValueError, match="Unknown prompt mode"):
+        PromptBuilder(
+            load_task("level1/19_ReLU"),
+            load_hardware_profile("ascend910b2"),
+        ).build("not_a_mode")

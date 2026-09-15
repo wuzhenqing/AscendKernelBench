@@ -6,7 +6,7 @@ Evaluation settings live in `configs/eval_default.yaml`. Hardware descriptions l
 
 1. A supplied generation or baseline CLI flag overrides the corresponding configuration setting.
 2. `--config PATH` on those scripts loads that YAML file; otherwise, the repository's default file is loaded. Evaluation does not take `--config`.
-3. Omitted top-level fields receive `EvalConfig` dataclass defaults. Generation scripts apply their own defaults for missing `generation` keys.
+3. Omitted top-level fields receive `EvalConfig` Pydantic-model defaults. Generation scripts apply their own defaults for missing `generation` keys.
 
 A custom YAML file **replaces** the default file; the loader does not merge files. Nested mappings such as `tolerances` and `generation` are not recursively merged with the default YAML. Unknown top-level keys are silently ignored, so a misspelled key may appear to work while leaving the default in effect. The loader does not provide comprehensive value/range validation.
 

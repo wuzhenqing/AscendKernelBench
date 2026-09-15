@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from loguru import logger
 
 
 def pop_required_path(cfg: dict[str, Any], key: str) -> Path:
@@ -27,7 +28,7 @@ def pop_required_path(cfg: dict[str, Any], key: str) -> Path:
     """
     raw = cfg.pop(key, None)
     if not isinstance(raw, str) or not raw.strip():
-        print(f"cfg.json missing {key}", file=sys.stderr)
+        logger.error("cfg.json missing {}", key)
         sys.exit(2)
     return Path(raw)
 
@@ -45,12 +46,12 @@ def load_cfg_argv(argv: list[str]) -> dict[str, Any]:
         SystemExit: If the argument list or file is unusable.
     """
     if len(argv) != 2:
-        print(f"Usage: {argv[0]} <cfg.json>", file=sys.stderr)
+        logger.error("Usage: {} <cfg.json>", argv[0])
         sys.exit(2)
     try:
         return read_json_object(Path(argv[1]))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
-        print(f"invalid cfg.json: {exc}", file=sys.stderr)
+        logger.error("invalid cfg.json: {}", exc)
         sys.exit(2)
 
 

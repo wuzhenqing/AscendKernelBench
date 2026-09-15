@@ -1,7 +1,9 @@
 """Worker-side build, correctness, and timing for one sample.
 
 Runs inside the isolated subprocess started by :func:`eval.evaluate_run`.
-See docs/guide/evaluation.md for the protocol this module implements.
+The stages (build, load, correctness, timing, re-check) live on
+:class:`SampleEvaluator` so shared trial state is explicit. See
+docs/guide/evaluation.md for the protocol this module implements.
 """
 
 from __future__ import annotations
@@ -9,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 from .build import BuildError, LoadError, build_custom_op, load_custom_op
 from .compare import (
@@ -34,7 +38,31 @@ from .timing import (
     time_execution_with_npu_event,
 )
 
-__all__ = ["eval_sample_on_device", "exec_python_source"]
+__all__ = ["DeviceEvalRequest", "eval_sample_on_device", "exec_python_source"]
+
+
+class DeviceEvalRequest(BaseModel):
+    """Validated worker payload for one on-device sample evaluation."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    task_py: str
+    sample_dir: str
+    cmake_arch: str
+    hardware_name: str
+    device: str
+    measure_performance: bool
+    seed: int
+    num_correct_trials: int
+    num_perf_trials: int
+    num_warmup: int
+    precision: str
+    tolerances: dict[str, dict[str, float]]
+    excessive_speedup: float
+    build_timeout: int
+    memory_bandwidth_gbps: float = 0.0
+    peak_tflops: float = 0.0
+    l2_clear_size: int = 256 * 1024 * 1024
 
 
 def exec_python_source(
@@ -61,377 +89,377 @@ def cpu_reference_inputs(
     ]
 
 
-def eval_sample_on_device(
-    *,
-    task_py: str,
-    sample_dir: str,
-    cmake_arch: str,
-    hardware_name: str,
-    device: str,
-    measure_performance: bool,
-    seed: int,
-    num_correct_trials: int,
-    num_perf_trials: int,
-    num_warmup: int,
-    precision: str,
-    tolerances: dict[str, dict[str, float]],
-    excessive_speedup: float,
-    build_timeout: int,
-    memory_bandwidth_gbps: float = 0.0,
-    peak_tflops: float = 0.0,
-    l2_clear_size: int = 256 * 1024 * 1024,
-) -> dict[str, Any]:
+def eval_sample_on_device(**kwargs: Any) -> dict[str, Any]:
     """Build, check correctness, and time a sample in the current process."""
-    import torch
-    import torch_npu  # noqa: F401
+    request = DeviceEvalRequest.model_validate(kwargs)
+    return SampleEvaluator(request).run()
 
-    sample_path = Path(sample_dir)
-    asc_source = (sample_path / "custom_op.asc").read_text(encoding="utf-8")
-    try:
-        so_path = build_custom_op(
-            asc_source,
-            sample_path,
-            cmake_arch=cmake_arch,
-            timeout_s=build_timeout,
+
+class SampleEvaluator:
+    """Stateful worker that evaluates one generated sample on the NPU."""
+
+    def __init__(self, request: DeviceEvalRequest) -> None:
+        """Bind the request; runtime objects are filled during ``run``."""
+        self.req = request
+        self.sample_path = Path(request.sample_dir)
+        self.so_path: Path | None = None
+        self.torch: Any = None
+        self.torch_device: Any = None
+        self.dtype: Any = None
+        self.ref_globals: dict[str, Any] = {}
+        self.model_cls: Any = None
+        self.model_new_cls: Any = None
+        self.get_init_inputs: Any = None
+        self.get_inputs: Any = None
+        self.custom_check: Any = None
+        self.init_inputs: Any = None
+        self.atol = 0.0
+        self.rtol = 0.0
+        self.new_model: Any = None
+        self.ref_model: Any = None
+        self.ref_model_cpu: Any = None
+        self.ref_mode = "npu"
+        self.ref_npu_error: str | None = None
+        self.pass_count = 0
+        self.max_diff = 0.0
+        self.correctness_error = ""
+        self.last_new_out: Any = None
+        self.metadata: dict[str, Any] = {}
+        self.runtime: Any = None
+        self.runtime_stats: Any = None
+        self.ref_runtime: Any = None
+        self.ref_runtime_stats: Any = None
+
+    def run(self) -> dict[str, Any]:
+        """Execute build, correctness, optional timing, and the re-check."""
+        import torch
+        import torch_npu  # noqa: F401
+
+        self.torch = torch
+        failed = self._build_and_load()
+        if failed is not None:
+            return failed
+        failed = self._load_python_modules()
+        if failed is not None:
+            return failed
+        self._prepare_device()
+        failed = self._construct_models()
+        if failed is not None:
+            return failed
+        failed = self._run_correctness_trials()
+        if failed is not None:
+            return failed
+        self._fill_metadata()
+        if self.pass_count != self.req.num_correct_trials:
+            self.metadata["correctness_error"] = self.correctness_error
+            return compiled_result(correctness=False, metadata=self.metadata)
+        if self.req.measure_performance:
+            self._time_both_models()
+            if self._post_timing_recheck() is not None:
+                return self._compiled(correctness=False)
+        return self._compiled(correctness=True)
+
+    def _compiled(self, *, correctness: bool) -> dict[str, Any]:
+        """Return a post-build payload from the fields collected so far."""
+        return compiled_result(
+            correctness=correctness,
+            metadata=self.metadata,
+            runtime=self.runtime,
+            runtime_stats=self.runtime_stats,
+            ref_runtime=self.ref_runtime,
+            ref_runtime_stats=self.ref_runtime_stats,
         )
-        load_custom_op(so_path, asc_source)
-    except (BuildError, OSError) as exc:
-        return fail_result(compilation_error=str(exc))
-    except LoadError as exc:
-        return fail_result(
-            compiled=True,
-            runtime_error=f"shared library load failed: {exc}",
+
+    def _build_and_load(self) -> dict[str, Any] | None:
+        """Compile and load ``libcustom_op.so``; fail-payload on error."""
+        asc_source = (self.sample_path / "custom_op.asc").read_text(
+            encoding="utf-8"
         )
+        try:
+            self.so_path = build_custom_op(
+                asc_source,
+                self.sample_path,
+                cmake_arch=self.req.cmake_arch,
+                timeout_s=self.req.build_timeout,
+            )
+            load_custom_op(self.so_path, asc_source)
+        except (BuildError, OSError) as exc:
+            return fail_result(compilation_error=str(exc))
+        except LoadError as exc:
+            return fail_result(
+                compiled=True,
+                runtime_error=f"shared library load failed: {exc}",
+            )
+        return None
 
-    try:
-        ref_globals = exec_python_source(task_py, "<task.py>")
-        model_cls = ref_globals["Model"]
-        get_init_inputs = ref_globals["get_init_inputs"]
-        get_inputs = ref_globals["get_inputs"]
-        custom_check = ref_globals.get("custom_check")
-        model_new_path = sample_path / "model_new.py"
-        custom_globals = exec_python_source(
-            model_new_path.read_text(encoding="utf-8"),
-            str(model_new_path),
-            {"__file__": str(model_new_path)},
+    def _load_python_modules(self) -> dict[str, Any] | None:
+        """Exec the task and ``model_new.py``; fail-payload on error."""
+        try:
+            self.ref_globals = exec_python_source(self.req.task_py, "<task.py>")
+            self.model_cls = self.ref_globals["Model"]
+            self.get_init_inputs = self.ref_globals["get_init_inputs"]
+            self.get_inputs = self.ref_globals["get_inputs"]
+            self.custom_check = self.ref_globals.get("custom_check")
+            model_new_path = self.sample_path / "model_new.py"
+            custom_globals = exec_python_source(
+                model_new_path.read_text(encoding="utf-8"),
+                str(model_new_path),
+                {"__file__": str(model_new_path)},
+            )
+            self.model_new_cls = custom_globals["ModelNew"]
+        except Exception as exc:
+            return fail_result(
+                compiled=True, runtime_error=f"module load failed: {exc!r}"
+            )
+        task_tolerance = self.ref_globals.get("TOLERANCE")
+        self.atol, self.rtol = resolve_tolerances(
+            self.req.precision,
+            self.req.tolerances,
+            task_tolerance if isinstance(task_tolerance, dict) else None,
         )
-        model_new_cls = custom_globals["ModelNew"]
-    except Exception as exc:
-        return fail_result(
-            compiled=True, runtime_error=f"module load failed: {exc!r}"
-        )
+        return None
 
-    task_tolerance = ref_globals.get("TOLERANCE")
-    atol, rtol = resolve_tolerances(
-        precision,
-        tolerances,
-        task_tolerance if isinstance(task_tolerance, dict) else None,
-    )
+    def _prepare_device(self) -> None:
+        """Select the NPU, dtype, and constructor seed."""
+        self.torch_device = self.torch.device(self.req.device)
+        self.torch.npu.set_device(npu_device_index(self.req.device))
+        self.dtype = torch_dtype_for(self.req.precision)
+        seed_torch(self.req.seed)
+        self.init_inputs = self.get_init_inputs()
 
-    torch_device = torch.device(device)
-    torch.npu.set_device(npu_device_index(device))
-    dtype = torch_dtype_for(precision)
+    def _construct_models(self) -> dict[str, Any] | None:
+        """Build ModelNew and the NPU (or CPU-fallback) reference."""
+        try:
+            seed_torch(self.req.seed)
+            self.new_model = self.model_new_cls(*self.init_inputs).to(
+                device=self.torch_device, dtype=self.dtype
+            )
+            self.new_model.eval()
+        except Exception as exc:
+            return fail_result(
+                compiled=True,
+                runtime_error=f"candidate model init failed: {exc!r}",
+            )
+        try:
+            seed_torch(self.req.seed)
+            self.ref_model = self.model_cls(*self.init_inputs).to(
+                device=self.torch_device, dtype=self.dtype
+            )
+            self.ref_model.eval()
+        except Exception as exc:
+            self.ref_mode = "cpu"
+            self.ref_npu_error = repr(exc)
+        return None
 
-    seed_torch(seed)
-    init_inputs = get_init_inputs()
-    try:
-        seed_torch(seed)
-        new_model = model_new_cls(*init_inputs).to(
-            device=torch_device, dtype=dtype
-        )
-        new_model.eval()
-    except Exception as exc:
-        return fail_result(
-            compiled=True,
-            runtime_error=f"candidate model init failed: {exc!r}",
-        )
+    def _process_input(self, value: Any) -> Any:
+        """Move one argument onto the evaluation device."""
+        return move_value_to_device(value, self.torch_device, self.dtype)
 
-    ref_mode = "npu"
-    ref_npu_error: str | None = None
-    ref_model = None
-    ref_model_cpu = None
-    try:
-        seed_torch(seed)
-        ref_model = model_cls(*init_inputs).to(device=torch_device, dtype=dtype)
-        ref_model.eval()
-    except Exception as exc:
-        ref_mode = "cpu"
-        ref_npu_error = repr(exc)
-
-    def process_input(value: Any) -> Any:
-        return move_value_to_device(value, torch_device, dtype)
-
-    def outputs_ok(ref: Any, new: Any) -> bool:
+    def _outputs_ok(self, ref: Any, new: Any) -> bool:
+        """Compare candidate outputs under the active reference mode."""
         return compare_candidate_outputs(
             ref,
             new,
-            ref_mode=ref_mode,
-            atol=atol,
-            rtol=rtol,
-            custom_check=custom_check if callable(custom_check) else None,
+            ref_mode=self.ref_mode,
+            atol=self.atol,
+            rtol=self.rtol,
+            custom_check=(
+                self.custom_check if callable(self.custom_check) else None
+            ),
         )
 
-    def run_ref_cpu(raw_inputs: Sequence[Any]) -> Any:
-        nonlocal ref_model_cpu
-        if ref_model_cpu is None:
-            seed_torch(seed)
-            ref_model_cpu = model_cls(*init_inputs)
-            ref_model_cpu.eval()
-        return ref_model_cpu(*cpu_reference_inputs(raw_inputs, torch))
+    def _run_ref_cpu(self, raw_inputs: Sequence[Any]) -> Any:
+        """Lazily construct and run the CPU reference model."""
+        if self.ref_model_cpu is None:
+            seed_torch(self.req.seed)
+            self.ref_model_cpu = self.model_cls(*self.init_inputs)
+            self.ref_model_cpu.eval()
+        return self.ref_model_cpu(*cpu_reference_inputs(raw_inputs, self.torch))
 
-    def run_reference(
-        inputs: Sequence[Any], raw_inputs: Sequence[Any], trial: int
+    def _run_reference(
+        self, inputs: Sequence[Any], raw_inputs: Sequence[Any], trial: int
     ) -> Any:
-        nonlocal ref_mode, ref_npu_error
-        if ref_mode != "npu":
-            return run_ref_cpu(raw_inputs)
+        """Run the NPU reference, falling back to CPU after a device error."""
+        if self.ref_mode != "npu":
+            return self._run_ref_cpu(raw_inputs)
         try:
-            ref_out = ref_model(*inputs)
-            torch.npu.synchronize(device=device)
+            ref_out = self.ref_model(*inputs)
+            self.torch.npu.synchronize(device=self.req.device)
             return ref_out
         except Exception as exc:
-            ref_mode = "cpu"
-            ref_npu_error = f"trial {trial}: {exc!r}"
-            return run_ref_cpu(raw_inputs)
+            self.ref_mode = "cpu"
+            self.ref_npu_error = f"trial {trial}: {exc!r}"
+            return self._run_ref_cpu(raw_inputs)
 
-    pass_count = 0
-    max_diff = 0.0
-    correctness_error = ""
-    last_new_out: Any = None
-    seed_torch(seed)
-    trial_seeds = [
-        torch.randint(0, 2**32 - 1, (1,)).item()
-        for _ in range(num_correct_trials)
-    ]
-    with torch.no_grad():
-        for trial, trial_seed in enumerate(trial_seeds):
-            seed_torch(trial_seed)
-            raw_inputs = get_inputs()
-            inputs = [process_input(item) for item in raw_inputs]
-            seed_torch(trial_seed)
-            torch.npu.synchronize(device=device)
-            ref_out = run_reference(inputs, raw_inputs, trial)
-            ref_snapshot = snapshot_inputs(inputs)
-            try:
-                new_out = new_model(*inputs)
-                torch.npu.synchronize(device=device)
-            except Exception as exc:
-                return fail_result(
-                    compiled=True,
-                    runtime_error=(
-                        f"trial {trial}: candidate runtime error: {exc!r}"
-                    ),
-                )
-            if inputs_were_mutated(inputs, ref_snapshot):
-                return fail_result(
-                    compiled=True,
-                    runtime_error=(
-                        f"trial {trial}: candidate mutated its inputs"
-                    ),
-                )
-            if outputs_ok(ref_out, new_out):
-                pass_count += 1
-            else:
-                max_diff = max(max_diff, max_abs_diff(ref_out, new_out))
-                correctness_error = (
-                    f"trial {trial}: output mismatch "
-                    f"(passed {pass_count}/{num_correct_trials} so far)"
-                )
-            last_new_out = new_out
+    def _run_correctness_trials(self) -> dict[str, Any] | None:
+        """Run seeded correctness trials; hard-fail on runtime or mutation."""
+        seed_torch(self.req.seed)
+        trial_seeds = [
+            self.torch.randint(0, 2**32 - 1, (1,)).item()
+            for _ in range(self.req.num_correct_trials)
+        ]
+        with self.torch.no_grad():
+            for trial, trial_seed in enumerate(trial_seeds):
+                failed = self._one_correctness_trial(trial, trial_seed)
+                if failed is not None:
+                    return failed
+        return None
 
-    metadata: dict[str, Any] = {
-        **eval_protocol_metadata(
-            hardware_name=hardware_name,
-            precision=precision,
-            seed=seed,
-            num_correct_trials=num_correct_trials,
-            num_warmup=num_warmup,
-            num_perf_trials=num_perf_trials,
-            l2_clear_size=l2_clear_size,
-            atol=atol,
-            rtol=rtol,
-        ),
-        "reference": ref_mode,
-        "max_difference": max_diff,
-        "correctness_passed": pass_count,
-        "shared_library": str(so_path),
-        **npu_runtime_metadata(device),
-    }
-    if ref_npu_error:
-        metadata["reference_npu_error"] = ref_npu_error
-
-    runtime = runtime_stats = ref_runtime = ref_runtime_stats = None
-    if pass_count != num_correct_trials:
-        metadata["correctness_error"] = correctness_error
-        return compiled_result(correctness=False, metadata=metadata)
-
-    if measure_performance:
-        timed = _time_both_models(
-            torch=torch,
-            new_model=new_model,
-            ref_model=ref_model,
-            ref_mode=ref_mode,
-            get_inputs=get_inputs,
-            process_input=process_input,
-            seed=seed,
-            num_warmup=num_warmup,
-            num_perf_trials=num_perf_trials,
-            torch_device=torch_device,
-            l2_clear_size=l2_clear_size,
-            metadata=metadata,
-            last_new_out=last_new_out,
-            ref_globals=ref_globals,
-            memory_bandwidth_gbps=memory_bandwidth_gbps,
-            peak_tflops=peak_tflops,
-            excessive_speedup=excessive_speedup,
-        )
-        runtime, runtime_stats, ref_runtime, ref_runtime_stats = timed
-        recheck = _post_timing_recheck(
-            torch=torch,
-            new_model=new_model,
-            ref_model=ref_model,
-            ref_mode=ref_mode,
-            run_ref_cpu=run_ref_cpu,
-            get_inputs=get_inputs,
-            process_input=process_input,
-            outputs_ok=outputs_ok,
-            seed=seed,
-            device=device,
-            metadata=metadata,
-        )
-        if recheck is not None:
-            return compiled_result(
-                correctness=False,
-                metadata=metadata,
-                runtime=runtime,
-                runtime_stats=runtime_stats,
-                ref_runtime=ref_runtime,
-                ref_runtime_stats=ref_runtime_stats,
+    def _one_correctness_trial(
+        self, trial: int, trial_seed: int
+    ) -> dict[str, Any] | None:
+        """Run one correctness trial; return a fail payload on hard errors."""
+        seed_torch(trial_seed)
+        raw_inputs = self.get_inputs()
+        inputs = [self._process_input(item) for item in raw_inputs]
+        seed_torch(trial_seed)
+        self.torch.npu.synchronize(device=self.req.device)
+        ref_out = self._run_reference(inputs, raw_inputs, trial)
+        ref_snapshot = snapshot_inputs(inputs)
+        try:
+            new_out = self.new_model(*inputs)
+            self.torch.npu.synchronize(device=self.req.device)
+        except Exception as exc:
+            return fail_result(
+                compiled=True,
+                runtime_error=(
+                    f"trial {trial}: candidate runtime error: {exc!r}"
+                ),
             )
+        if inputs_were_mutated(inputs, ref_snapshot):
+            return fail_result(
+                compiled=True,
+                runtime_error=(f"trial {trial}: candidate mutated its inputs"),
+            )
+        if self._outputs_ok(ref_out, new_out):
+            self.pass_count += 1
+        else:
+            self.max_diff = max(self.max_diff, max_abs_diff(ref_out, new_out))
+            self.correctness_error = (
+                f"trial {trial}: output mismatch "
+                f"(passed {self.pass_count}/{self.req.num_correct_trials} "
+                "so far)"
+            )
+        self.last_new_out = new_out
+        return None
 
-    return compiled_result(
-        correctness=True,
-        metadata=metadata,
-        runtime=runtime,
-        runtime_stats=runtime_stats,
-        ref_runtime=ref_runtime,
-        ref_runtime_stats=ref_runtime_stats,
-    )
-
-
-def _time_both_models(
-    *,
-    torch: Any,
-    new_model: Any,
-    ref_model: Any,
-    ref_mode: str,
-    get_inputs: Any,
-    process_input: Any,
-    seed: int,
-    num_warmup: int,
-    num_perf_trials: int,
-    torch_device: Any,
-    l2_clear_size: int,
-    metadata: dict[str, Any],
-    last_new_out: Any,
-    ref_globals: dict[str, object],
-    memory_bandwidth_gbps: float,
-    peak_tflops: float,
-    excessive_speedup: float,
-) -> tuple[Any, Any, Any, Any]:
-    """Time candidate and NPU reference; attach speedup and SOL metadata."""
-    runtime = runtime_stats = ref_runtime = ref_runtime_stats = None
-
-    def draw_inputs() -> list[Any]:
-        return [process_input(item) for item in get_inputs()]
-
-    seed_torch(seed)
-    probe_inputs = draw_inputs()
-    input_bytes = tensor_nbytes(probe_inputs)
-    fresh_per_trial = input_bytes <= REFRESH_INPUT_BYTES_LIMIT
-    metadata["timing_fresh_inputs"] = bool(fresh_per_trial)
-    perf_box: list[Any] = [probe_inputs]
-    prev_box: list[Any] = [None]
-
-    def refresh_inputs() -> None:
-        prev_box[0] = perf_box[0]
-        perf_box[0] = draw_inputs()
-
-    def timed(fn: Any) -> list[float]:
-        seed_torch(seed)
-        return time_execution_with_npu_event(
-            lambda: fn(*perf_box[0]),
-            [],
-            num_warmup=num_warmup,
-            num_trials=num_perf_trials,
-            device=torch_device,
-            setup=refresh_inputs if fresh_per_trial else None,
-            l2_clear_size=l2_clear_size,
-        )
-
-    try:
-        with torch.no_grad():
-            runtime_stats = get_timing_stats(timed(new_model))
-            runtime = runtime_stats["mean"]
-            if ref_mode == "npu":
-                ref_runtime_stats = get_timing_stats(timed(ref_model))
-                ref_runtime = ref_runtime_stats["mean"]
-                speedup = ref_runtime / runtime if runtime else 0.0
-                metadata["speedup"] = float(f"{speedup:.4g}")
-                metadata["excessive_speedup"] = bool(
-                    speedup > excessive_speedup
-                )
-        attach_sol_metadata(
-            metadata,
-            kernel_ms=runtime if isinstance(runtime, int | float) else None,
-            baseline_ms=(
-                ref_runtime if isinstance(ref_runtime, int | float) else None
+    def _fill_metadata(self) -> None:
+        """Record protocol, reference mode, and runtime-stack facts."""
+        self.metadata = {
+            **eval_protocol_metadata(
+                hardware_name=self.req.hardware_name,
+                precision=self.req.precision,
+                seed=self.req.seed,
+                num_correct_trials=self.req.num_correct_trials,
+                num_warmup=self.req.num_warmup,
+                num_perf_trials=self.req.num_perf_trials,
+                l2_clear_size=self.req.l2_clear_size,
+                atol=self.atol,
+                rtol=self.rtol,
             ),
-            bytes_moved=input_bytes + tensor_nbytes(last_new_out),
-            bandwidth_gbps=float(memory_bandwidth_gbps),
-            flops=task_declared_flops(ref_globals),
-            peak_tflops=float(peak_tflops) if peak_tflops else None,
-        )
-    except Exception as exc:
-        metadata["runtime_error"] = f"timing failed: {exc!r}"
-    return runtime, runtime_stats, ref_runtime, ref_runtime_stats
+            "reference": self.ref_mode,
+            "max_difference": self.max_diff,
+            "correctness_passed": self.pass_count,
+            "shared_library": str(self.so_path),
+            **npu_runtime_metadata(self.req.device),
+        }
+        if self.ref_npu_error:
+            self.metadata["reference_npu_error"] = self.ref_npu_error
 
+    def _time_both_models(self) -> None:
+        """Time candidate and NPU reference; attach speedup and SOL metadata."""
 
-def _post_timing_recheck(
-    *,
-    torch: Any,
-    new_model: Any,
-    ref_model: Any,
-    ref_mode: str,
-    run_ref_cpu: Any,
-    get_inputs: Any,
-    process_input: Any,
-    outputs_ok: Any,
-    seed: int,
-    device: str,
-    metadata: dict[str, Any],
-) -> dict[str, Any] | None:
-    """Fail the sample if a fresh-input re-check mismatches or raises."""
-    try:
-        seed_torch(seed + 1)
-        recheck_raw = get_inputs()
-        recheck_inputs = [process_input(item) for item in recheck_raw]
-        torch.npu.synchronize(device=device)
-        with torch.no_grad():
-            if ref_mode == "npu":
-                recheck_ref = ref_model(*recheck_inputs)
-                torch.npu.synchronize(device=device)
-            else:
-                recheck_ref = run_ref_cpu(recheck_raw)
-            recheck_new = new_model(*recheck_inputs)
-            torch.npu.synchronize(device=device)
-        if not outputs_ok(recheck_ref, recheck_new):
-            metadata["correctness_error"] = (
-                "post-timing fresh-input re-check failed: outputs are not "
-                "a pure function of current inputs (caching or state drift)"
+        def draw_inputs() -> list[Any]:
+            return [self._process_input(item) for item in self.get_inputs()]
+
+        seed_torch(self.req.seed)
+        probe_inputs = draw_inputs()
+        input_bytes = tensor_nbytes(probe_inputs)
+        fresh_per_trial = input_bytes <= REFRESH_INPUT_BYTES_LIMIT
+        self.metadata["timing_fresh_inputs"] = bool(fresh_per_trial)
+        perf_box: list[Any] = [probe_inputs]
+        prev_box: list[Any] = [None]
+
+        def refresh_inputs() -> None:
+            prev_box[0] = perf_box[0]
+            perf_box[0] = draw_inputs()
+
+        def timed(fn: Any) -> list[float]:
+            seed_torch(self.req.seed)
+            return time_execution_with_npu_event(
+                lambda: fn(*perf_box[0]),
+                [],
+                num_warmup=self.req.num_warmup,
+                num_trials=self.req.num_perf_trials,
+                device=self.torch_device,
+                setup=refresh_inputs if fresh_per_trial else None,
+                l2_clear_size=self.req.l2_clear_size,
             )
-            return metadata
-    except Exception as exc:
-        metadata["runtime_error"] = f"post-timing re-check failed: {exc!r}"
-        return metadata
-    return None
+
+        try:
+            with self.torch.no_grad():
+                self.runtime_stats = get_timing_stats(timed(self.new_model))
+                self.runtime = self.runtime_stats["mean"]
+                if self.ref_mode == "npu":
+                    self.ref_runtime_stats = get_timing_stats(
+                        timed(self.ref_model)
+                    )
+                    self.ref_runtime = self.ref_runtime_stats["mean"]
+                    speedup = (
+                        self.ref_runtime / self.runtime if self.runtime else 0.0
+                    )
+                    self.metadata["speedup"] = float(f"{speedup:.4g}")
+                    self.metadata["excessive_speedup"] = bool(
+                        speedup > self.req.excessive_speedup
+                    )
+            attach_sol_metadata(
+                self.metadata,
+                kernel_ms=(
+                    self.runtime
+                    if isinstance(self.runtime, int | float)
+                    else None
+                ),
+                baseline_ms=(
+                    self.ref_runtime
+                    if isinstance(self.ref_runtime, int | float)
+                    else None
+                ),
+                bytes_moved=input_bytes + tensor_nbytes(self.last_new_out),
+                bandwidth_gbps=float(self.req.memory_bandwidth_gbps),
+                flops=task_declared_flops(self.ref_globals),
+                peak_tflops=(
+                    float(self.req.peak_tflops)
+                    if self.req.peak_tflops
+                    else None
+                ),
+            )
+        except Exception as exc:
+            self.metadata["runtime_error"] = f"timing failed: {exc!r}"
+
+    def _post_timing_recheck(self) -> dict[str, Any] | None:
+        """Fail the sample if a fresh-input re-check mismatches or raises."""
+        try:
+            seed_torch(self.req.seed + 1)
+            recheck_raw = self.get_inputs()
+            recheck_inputs = [self._process_input(item) for item in recheck_raw]
+            self.torch.npu.synchronize(device=self.req.device)
+            with self.torch.no_grad():
+                if self.ref_mode == "npu":
+                    recheck_ref = self.ref_model(*recheck_inputs)
+                    self.torch.npu.synchronize(device=self.req.device)
+                else:
+                    recheck_ref = self._run_ref_cpu(recheck_raw)
+                recheck_new = self.new_model(*recheck_inputs)
+                self.torch.npu.synchronize(device=self.req.device)
+            if not self._outputs_ok(recheck_ref, recheck_new):
+                self.metadata["correctness_error"] = (
+                    "post-timing fresh-input re-check failed: outputs are not "
+                    "a pure function of current inputs (caching or state drift)"
+                )
+                return self.metadata
+        except Exception as exc:
+            self.metadata["runtime_error"] = (
+                f"post-timing re-check failed: {exc!r}"
+            )
+            return self.metadata
+        return None

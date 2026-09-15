@@ -1,6 +1,10 @@
 """Hardware profile and eval config loading."""
 
-from ascend_kernel_bench.config import load_eval_config, load_hardware_profile
+from ascend_kernel_bench.config import (
+    EvalConfig,
+    load_eval_config,
+    load_hardware_profile,
+)
 from ascend_kernel_bench.timing import DEFAULT_L2_CLEAR_BYTES, l2_clear_bytes
 
 
@@ -8,6 +12,14 @@ def test_default_eval_config_warmup() -> None:
     config = load_eval_config()
     assert config.num_warmup == 10
     assert config.num_perf_trials == 100
+
+
+def test_eval_config_ignores_unknown_keys() -> None:
+    config = EvalConfig.from_dict(
+        {"hardware": "ascend910b2", "not_a_real_key": 123, "generation": None}
+    )
+    assert config.hardware == "ascend910b2"
+    assert config.generation == {}
 
 
 def test_910b2_profile_loads_sol_fields() -> None:

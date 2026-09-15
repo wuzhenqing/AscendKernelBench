@@ -10,6 +10,7 @@ from ascend_kernel_bench.cli_util import (
     select_tasks,
 )
 from ascend_kernel_bench.config import EvalConfig
+from ascend_kernel_bench.report import SampleStatus
 
 
 def test_resolve_generation_settings_overrides() -> None:
@@ -108,3 +109,4 @@ def test_sample_status_label() -> None:
         "red",
         "WRONG",
     )
+    assert SampleStatus.from_result({"correctness": True}).label == "OK"

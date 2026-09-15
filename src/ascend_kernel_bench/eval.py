@@ -7,16 +7,13 @@ docs/guide/evaluation.md for the evaluation protocol.
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
-import signal
-import subprocess
 import sys
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from . import rundir
 from ._paths import REPO_ROOT
@@ -36,6 +33,7 @@ from .io_util import (
     read_json_object,
     write_json_atomic,
 )
+from .process import IsolatedJsonWorker
 from .score import compute_pass_at_k
 from .timing import l2_clear_bytes
 
@@ -98,6 +96,7 @@ def eval_sample(
         )
 
     timeout_s = config.eval_timeout + 2 * config.build_timeout
+    logger.debug("eval {} in {}", task.task_id, sample_dir)
     result = _run_eval_worker(
         {
             "task_py": task.task_py,
@@ -185,48 +184,35 @@ def _worker_argv(cfg_path: Path) -> list[str]:
 
 def worker_main(argv: list[str]) -> None:
     """Read ``cfg.json``, evaluate one sample, and write ``result_path``."""
+    from .log import setup_logging
+
+    setup_logging(rich_tracebacks=False)
     cfg = load_cfg_argv(argv)
     result_path = pop_required_path(cfg, "result_path")
     try:
         result = eval_sample_on_device(**cfg)
     except Exception as exc:
+        logger.exception("eval worker crashed")
         result = fail_result(compiled=True, runtime_error=repr(exc))
     write_json_atomic(result_path, result)
 
 
 def _run_eval_worker(cfg: dict[str, Any], timeout_s: int) -> dict[str, Any]:
     """Spawn the repo worker script and return its payload."""
-    with tempfile.TemporaryDirectory(prefix="akb_eval_") as tmpdir:
-        result_path = Path(tmpdir) / "result.json"
-        cfg_path = Path(tmpdir) / "cfg.json"
-        write_json_atomic(cfg_path, {**cfg, "result_path": str(result_path)})
-        env = dict(os.environ)
-        env.setdefault("ASCEND_SLOG_PRINT_TO_STDOUT", "0")
-        proc = subprocess.Popen(
-            _worker_argv(cfg_path),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-            env=env,
+    outcome = IsolatedJsonWorker.for_eval(timeout_s).run(cfg)
+    if outcome.timed_out:
+        return fail_result(runtime_error=f"eval timed out after {timeout_s}s")
+    if outcome.returncode != 0:
+        err = outcome.stderr.strip()
+        return fail_result(
+            runtime_error=err[-2000:]
+            or f"worker exited with code {outcome.returncode}"
         )
-        try:
-            _, stderr = proc.communicate(timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
-            return fail_result(
-                runtime_error=f"eval timed out after {timeout_s}s"
-            )
-
-        if proc.returncode != 0:
-            err = (stderr or "").strip()
-            return fail_result(
-                runtime_error=err[-2000:]
-                or f"worker exited with code {proc.returncode}"
-            )
-        return _read_worker_payload(result_path)
+    if outcome.payload is not None:
+        return outcome.payload
+    return fail_result(
+        runtime_error=outcome.parse_error or "worker produced no result.json"
+    )
 
 
 def _read_worker_payload(result_path: Path) -> dict[str, Any]:

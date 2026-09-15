@@ -12,10 +12,10 @@ Example:
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import datetime
 
 import _bootstrap  # noqa: F401
+from loguru import logger
 from rich.console import Console
 
 from ascend_kernel_bench import rundir
@@ -27,6 +27,7 @@ from ascend_kernel_bench.cli_util import (
     select_tasks,
 )
 from ascend_kernel_bench.llm import LLMClient
+from ascend_kernel_bench.log import die, setup_logging
 from ascend_kernel_bench.prompt import SYSTEM_PROMPT, build_prompt
 
 console = Console()
@@ -34,6 +35,7 @@ console = Console()
 
 def main() -> None:
     """Generate one or more samples per selected task."""
+    setup_logging()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--level", type=int, default=None)
     parser.add_argument(
@@ -70,7 +72,7 @@ def main() -> None:
 
     tasks = select_tasks(level=args.level, task_ids=args.task)
     if not tasks:
-        sys.exit("no tasks found")
+        die("no tasks found")
 
     run_name = args.run_name or f"gen_{datetime.now():%Y%m%d_%H%M%S}"
     run_dir = rundir.create_run(
@@ -81,9 +83,11 @@ def main() -> None:
             task_ids=[task.task_id for task in tasks],
         ),
     )
-    console.print(
-        f"run dir: {run_dir}  "
-        f"({len(tasks)} tasks x {settings.num_samples} samples)"
+    logger.info(
+        "run dir: {} ({} tasks x {} samples)",
+        run_dir,
+        len(tasks),
+        settings.num_samples,
     )
 
     client = LLMClient(
@@ -115,15 +119,17 @@ def main() -> None:
                     )
                 except Exception as exc:
                     failures += 1
-                    console.print(
-                        f"[red]generate failed {task.task_id} "
-                        f"sample {sample_id}: {exc}[/red]"
+                    logger.error(
+                        "generate failed {} sample {}: {}",
+                        task.task_id,
+                        sample_id,
+                        exc,
                     )
                 progress.advance(bar)
-    console.print(
-        f"done: {total - failures}/{total} samples saved to {run_dir}"
+    logger.info(
+        "done: {}/{} samples saved to {}", total - failures, total, run_dir
     )
-    sys.exit(1 if failures == total else 0)
+    raise SystemExit(1 if failures == total else 0)
 
 
 if __name__ == "__main__":

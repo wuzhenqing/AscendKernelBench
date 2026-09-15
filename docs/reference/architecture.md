@@ -36,16 +36,19 @@ KernelBench task + hardware profile
 | `prompt.py` | Task source, hardware information, examples, and output-contract assembly. |
 | `llm.py` | Endpoint requests, structured/fenced response handling, and basic deliverable validation. |
 | `rundir.py` | Run paths, generated files, per-sample collection, and atomic aggregate writes. |
-| `checker.py` | Heuristic Python AST/pattern checks and Ascend C source checks. |
+| `checker.py` | Stable re-export of static checks. Implementation is `checks/` (regex `PatternRule`s, Python AST visitor, Ascend C rules). |
 | `eval.py` | Public host API (`evaluate_run`) and isolated worker spawn. |
-| `eval_device.py` | Worker-side build, seeded correctness, NPU-event timing, and SOL attach. |
+| `eval_device.py` | Worker-side `SampleEvaluator`: build, seeded correctness, NPU-event timing, and SOL attach. |
+| `process.py` | Shared isolated JSON worker (`IsolatedJsonWorker.for_eval` / `for_baseline`). |
+| `report.py` | Rich progress bars, sample status, and evaluation tables. |
+| `log.py` | loguru setup used by CLIs and workers. |
 | `eval_result.py` | KernelBench-compatible result payloads and protocol-snapshot metadata. |
 | `build.py` and `build_template/` | CMake build of `libcustom_op.so` and `torch.ops.load_library`. |
 | `timing.py` | NPU events, L2 flush sized from the hardware profile, and timing statistics. |
 | `compare.py` | Dtype-aware output matching and tensor-byte accounting. |
 | `sol.py` | Roofline bound and SOL-ExecBench-style score. |
 | `runtime.py` | CANN / PyTorch / torch-npu / device identity recorded in result metadata. |
-| `cli_util.py` | Shared CLI flags, YAML/hardware loading, task selection, generation-config records, progress bars, and result-status lines. |
+| `cli_util.py` | Generation/eval setting factories, task selection, and re-exports of `report.py`. |
 | `io_util.py` | Atomic JSON/YAML writes, JSON-object reads, and worker cfg loading. |
 | `baseline_worker.py` | Isolated eager-reference timing used by `scripts/baseline.py`. |
 | `score.py` | Sample speedups, `fast_p`, geometric mean speedup, pass@k, and mean SOL. |

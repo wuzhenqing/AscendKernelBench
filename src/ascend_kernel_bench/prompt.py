@@ -21,7 +21,9 @@ an OPP / custom_opp install project, or in-process JIT compilation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from enum import Enum
+
+from pydantic import BaseModel, ConfigDict
 
 from ._paths import PROMPT_EXAMPLES_DIR
 from .config import HardwareProfile
@@ -105,9 +107,34 @@ Output Contract.
 """
 
 
-@dataclass(frozen=True)
-class PromptExample:
+class PromptMode(str, Enum):
+    """How many bundled examples the user prompt includes."""
+
+    ZERO_SHOT = "zero_shot"
+    ONE_SHOT = "one_shot"
+    FEW_SHOT = "few_shot"
+
+    def chosen_examples(self, pool: list[PromptExample]) -> list[PromptExample]:
+        """Return the example slice this mode should embed.
+
+        Args:
+            pool: Bundled or caller-supplied examples.
+
+        Returns:
+            ``[]`` for zero-shot, the first example for one-shot, or
+            the full pool for few-shot.
+        """
+        if self is PromptMode.ZERO_SHOT:
+            return []
+        if self is PromptMode.ONE_SHOT:
+            return pool[:1]
+        return list(pool)
+
+
+class PromptExample(BaseModel):
     """A verified example pair (task input -> expected answer)."""
+
+    model_config = ConfigDict(frozen=True)
 
     name: str
     task_py: str
@@ -143,30 +170,87 @@ def load_examples() -> list[PromptExample]:
     return examples
 
 
-def _problem_statement(task: Task) -> str:
-    """Return the English problem-statement block for ``task``."""
-    return f"""\
+class PromptBuilder:
+    """Assemble the generation prompt as an ordered list of sections."""
+
+    def __init__(
+        self,
+        task: Task,
+        hardware: HardwareProfile,
+        *,
+        examples: list[PromptExample] | None = None,
+    ) -> None:
+        """Bind the task, hardware profile, and optional example override.
+
+        Args:
+            task: Reference KernelBench task.
+            hardware: Profile injected into the hardware-contract block.
+            examples: Optional override of bundled examples.
+        """
+        self.task = task
+        self.hardware = hardware
+        self._examples = examples
+
+    def build(self, mode: str | PromptMode = PromptMode.ONE_SHOT) -> str:
+        """Return the complete English user prompt (no system message).
+
+        Args:
+            mode: ``zero_shot``, ``one_shot``, or ``few_shot``.
+
+        Returns:
+            Assembled markdown prompt.
+
+        Raises:
+            ValueError: If ``mode`` is unknown or examples are required
+                but missing.
+        """
+        try:
+            if isinstance(mode, PromptMode):
+                resolved = mode
+            else:
+                resolved = PromptMode(mode)
+        except ValueError as exc:
+            raise ValueError(f"Unknown prompt mode: {mode}") from exc
+        sections = [self._problem_statement(), self._hardware_block()]
+        chosen = resolved.chosen_examples(self._example_pool(resolved))
+        if chosen:
+            sections.append(self._examples_block(chosen))
+        sections.extend([OUTPUT_CONTRACT, INSTRUCTION])
+        return "\n".join(sections)
+
+    def _example_pool(self, mode: PromptMode) -> list[PromptExample]:
+        """Load bundled examples when the mode needs them."""
+        if mode is PromptMode.ZERO_SHOT:
+            return []
+        pool = self._examples if self._examples is not None else load_examples()
+        if not pool:
+            raise ValueError("no prompt examples available")
+        return pool
+
+    def _problem_statement(self) -> str:
+        """Return the English problem-statement block."""
+        return f"""\
 ## Problem Statement
 
 Implement the operator defined by the reference PyTorch model below as an
 Ascend C kernel on the target NPU.
 
 ```python
-{task.task_py}
+{self.task.task_py}
 ```
 """
 
-
-def _hardware_block(hw: HardwareProfile) -> str:
-    """Return the English hardware-contract block from ``hw``."""
-    dtypes = ", ".join(hw.supported_dtypes)
-    cores = f"{hw.ai_core_num}"
-    if hw.cube_core_num or hw.vector_core_num:
-        cores = (
-            f"{hw.ai_core_num} (cube={hw.cube_core_num}, "
-            f"vector={hw.vector_core_num})"
-        )
-    return f"""\
+    def _hardware_block(self) -> str:
+        """Return the English hardware-contract block."""
+        hw = self.hardware
+        dtypes = ", ".join(hw.supported_dtypes)
+        cores = f"{hw.ai_core_num}"
+        if hw.cube_core_num or hw.vector_core_num:
+            cores = (
+                f"{hw.ai_core_num} (cube={hw.cube_core_num}, "
+                f"vector={hw.vector_core_num})"
+            )
+        return f"""\
 ## Target Hardware Contract
 
 - SoC: {hw.soc_version} (CMake arch `{hw.cmake_arch}`)
@@ -179,19 +263,18 @@ def _hardware_block(hw: HardwareProfile) -> str:
 {hw.api_style}
 """
 
-
-def _examples_block(examples: list[PromptExample]) -> str:
-    """Render verified example pairs as prompt markdown."""
-    parts = ["## Example\n"]
-    for example in examples:
-        parts.append(
-            f"### Example task: {example.name}\n\n"
-            f"Reference Model:\n\n```python\n{example.task_py}\n```\n\n"
-            f"Expected answer:\n\n"
-            f"```custom_op.asc\n{example.custom_op_asc}\n```\n\n"
-            f"```model_new.py\n{example.model_new_py}\n```\n"
-        )
-    return "\n".join(parts)
+    def _examples_block(self, examples: list[PromptExample]) -> str:
+        """Render verified example pairs as prompt markdown."""
+        parts = ["## Example\n"]
+        for example in examples:
+            parts.append(
+                f"### Example task: {example.name}\n\n"
+                f"Reference Model:\n\n```python\n{example.task_py}\n```\n\n"
+                f"Expected answer:\n\n"
+                f"```custom_op.asc\n{example.custom_op_asc}\n```\n\n"
+                f"```model_new.py\n{example.model_new_py}\n```\n"
+            )
+        return "\n".join(parts)
 
 
 def build_prompt(
@@ -216,14 +299,4 @@ def build_prompt(
         ValueError: If ``mode`` is unknown or examples are required
             but missing.
     """
-    if mode not in {"zero_shot", "one_shot", "few_shot"}:
-        raise ValueError(f"Unknown prompt mode: {mode}")
-    components = [_problem_statement(task), _hardware_block(hardware)]
-    if mode != "zero_shot":
-        pool = examples if examples is not None else load_examples()
-        if not pool:
-            raise ValueError("no prompt examples available")
-        chosen = pool[:1] if mode == "one_shot" else pool
-        components.append(_examples_block(chosen))
-    components.extend([OUTPUT_CONTRACT, INSTRUCTION])
-    return "\n".join(components)
+    return PromptBuilder(task, hardware, examples=examples).build(mode)

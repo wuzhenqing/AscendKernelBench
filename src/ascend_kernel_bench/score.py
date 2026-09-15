@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from statistics import geometric_mean
 from typing import Any
 
 from .sol import mean_sol_score
@@ -95,7 +96,7 @@ def geometric_mean_speedup(samples: Sequence[Mapping[str, Any]]) -> float:
     ]
     if not speedups:
         return 0.0
-    return math.exp(sum(math.log(s) for s in speedups) / len(speedups))
+    return float(geometric_mean(speedups))
 
 
 def pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
