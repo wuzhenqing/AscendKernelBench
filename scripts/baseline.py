@@ -13,13 +13,10 @@ Example:
 from __future__ import annotations
 
 import argparse
-import json
-import subprocess
-import sys
-import tempfile
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
+from loguru import logger
 from rich.console import Console
 
 from ascend_kernel_bench._paths import BASELINE_DIR
@@ -30,7 +27,9 @@ from ascend_kernel_bench.cli_util import (
 )
 from ascend_kernel_bench.config import EvalConfig
 from ascend_kernel_bench.dataset import Task
-from ascend_kernel_bench.io_util import read_json_object, write_json_atomic
+from ascend_kernel_bench.io_util import write_json_atomic
+from ascend_kernel_bench.log import die, setup_logging
+from ascend_kernel_bench.process import IsolatedJsonWorker
 from ascend_kernel_bench.timing import l2_clear_bytes
 
 console = Console()
@@ -58,9 +57,10 @@ def measure_baseline(
 
     Raises:
         RuntimeError: If the worker process exits non-zero.
+        subprocess.TimeoutExpired: If the worker exceeds ``eval_timeout``.
     """
-    with tempfile.TemporaryDirectory(prefix="akb_baseline_") as tmpdir:
-        cfg = {
+    outcome = IsolatedJsonWorker.for_baseline(config.eval_timeout).run(
+        {
             "task_py": task.task_py,
             "device": device,
             "precision": config.precision,
@@ -68,28 +68,15 @@ def measure_baseline(
             "num_warmup": config.num_warmup,
             "num_perf_trials": config.num_perf_trials,
             "l2_clear_size": l2_clear_size,
-            "out_path": str(Path(tmpdir) / "stats.json"),
         }
-        cfg_path = Path(tmpdir) / "cfg.json"
-        write_json_atomic(cfg_path, cfg)
-        proc = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "ascend_kernel_bench.baseline_worker",
-                str(cfg_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=config.eval_timeout,
-            start_new_session=True,
+    )
+    if outcome.returncode != 0:
+        raise RuntimeError(f"baseline worker failed: {outcome.stderr[-1000:]}")
+    if outcome.payload is None:
+        raise RuntimeError(
+            f"invalid baseline worker JSON: {outcome.parse_error}"
         )
-        if proc.returncode != 0:
-            raise RuntimeError(f"baseline worker failed: {proc.stderr[-1000:]}")
-        try:
-            stats = read_json_object(Path(cfg["out_path"]))
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise RuntimeError(f"invalid baseline worker JSON: {exc}") from exc
+    stats = outcome.payload
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(out_path, stats)
     return stats
@@ -97,6 +84,7 @@ def measure_baseline(
 
 def main() -> None:
     """Archive eager ``torch_npu`` baselines for the selected tasks."""
+    setup_logging()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--level", type=int, default=None)
     parser.add_argument("--task", action="append", default=None)
@@ -109,12 +97,15 @@ def main() -> None:
     config, hardware = runtime.config, runtime.hardware
     tasks = select_tasks(level=args.level, task_ids=args.task)
     if not tasks:
-        sys.exit("no tasks found")
+        die("no tasks found")
 
     out_dir = BASELINE_DIR / hardware.name
     flush = l2_clear_bytes(hardware.l2_cache_mb)
-    console.print(
-        f"measuring {len(tasks)} baselines on {hardware.name} -> {out_dir}"
+    logger.info(
+        "measuring {} baselines on {} -> {}",
+        len(tasks),
+        hardware.name,
+        out_dir,
     )
     with cli_progress(console) as progress:
         bar = progress.add_task("baseline", total=len(tasks))
@@ -139,6 +130,7 @@ def main() -> None:
                         f" (CPU-reference task)[/yellow]"
                     )
             except Exception as exc:
+                logger.error("{}: {}", task.task_id, exc)
                 progress.console.print(f"  [red]{task.task_id}: {exc}[/red]")
             progress.advance(bar)
 

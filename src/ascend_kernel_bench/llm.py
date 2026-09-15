@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from typing import Protocol
 
+from loguru import logger
 from openai import OpenAI
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _FENCE_EDGE_RE = re.compile(
     r"^\s*```[A-Za-z0-9_+.-]*\s*\n(?P<body>.*?)\n?\s*```\s*$", re.DOTALL
@@ -66,14 +67,25 @@ class AscendCGeneration(BaseModel):
         return _strip_fence(value) if isinstance(value, str) else value
 
 
-@dataclass(frozen=True)
-class GenerationResult:
+class GenerationResult(BaseModel):
     """One LLM response after structured or fenced-block extraction."""
+
+    model_config = ConfigDict(frozen=True)
 
     generation: AscendCGeneration
     raw_text: str
     model: str
     usage: dict
+
+
+class ResponseParser(Protocol):
+    """Strategy for turning a chat transcript into deliverables."""
+
+    name: str
+
+    def parse(self, messages: list[dict]) -> GenerationResult:
+        """Parse ``messages`` into a :class:`GenerationResult`."""
+        ...
 
 
 STRUCTURED_OUTPUT_NOTE = (
@@ -205,45 +217,77 @@ class LLMClient:
                 last_raw = ""
         raise ValueError(f"generation failed validation: {last_error}")
 
+    def _parsers(self) -> tuple[ResponseParser, ...]:
+        """Return structured parse first, then fenced-block fallback."""
+        return (
+            StructuredOutputParser(self),
+            FencedBlockParser(self),
+        )
+
     def _generate_once(self, messages: list[dict]) -> GenerationResult:
         """Request one completion; fall back to fenced-block extraction."""
-        try:
-            return self._parse_structured(messages)
-        except Exception:
-            # Endpoint may not support structured outputs: plain completion +
-            # fenced-block extraction, validated by the same pydantic model.
-            return self._parse_fenced(messages)
+        last_error: Exception | None = None
+        for parser in self._parsers():
+            try:
+                return parser.parse(messages)
+            except Exception as exc:
+                last_error = exc
+                logger.debug("LLM parser {} failed: {}", parser.name, exc)
+        raise last_error or ValueError("no LLM response parser succeeded")
 
-    def _parse_structured(self, messages: list[dict]) -> GenerationResult:
+
+class StructuredOutputParser:
+    """Parse the OpenAI structured-output schema into deliverables."""
+
+    name = "structured"
+
+    def __init__(self, llm: LLMClient) -> None:
+        """Bind the parent client (model, temperature, token budget)."""
+        self._llm = llm
+
+    def parse(self, messages: list[dict]) -> GenerationResult:
         """Parse a structured-output response into the two deliverables."""
-        response = self.client.beta.chat.completions.parse(
-            model=self.model,
+        response = self._llm.client.beta.chat.completions.parse(
+            model=self._llm.model,
             messages=messages,
             response_format=AscendCGeneration,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            temperature=self._llm.temperature,
+            max_tokens=self._llm.max_tokens,
         )
         parsed = response.choices[0].message.parsed
         if parsed is None:
             raise ValueError("structured parse returned None")
         return GenerationResult(
-            parsed,
-            response.choices[0].message.content or "",
-            self.model,
-            _usage_dict(response),
+            generation=parsed,
+            raw_text=response.choices[0].message.content or "",
+            model=self._llm.model,
+            usage=_usage_dict(response),
         )
 
-    def _parse_fenced(self, messages: list[dict]) -> GenerationResult:
+
+class FencedBlockParser:
+    """Complete without a schema and extract fenced code blocks."""
+
+    name = "fenced"
+
+    def __init__(self, llm: LLMClient) -> None:
+        """Bind the parent client (model, temperature, token budget)."""
+        self._llm = llm
+
+    def parse(self, messages: list[dict]) -> GenerationResult:
         """Complete without a schema and extract fenced code blocks."""
-        response = self.client.chat.completions.create(
-            model=self.model,
+        response = self._llm.client.chat.completions.create(
+            model=self._llm.model,
             messages=messages,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            temperature=self._llm.temperature,
+            max_tokens=self._llm.max_tokens,
         )
         raw = response.choices[0].message.content or ""
         return GenerationResult(
-            extract_generation(raw), raw, self.model, _usage_dict(response)
+            generation=extract_generation(raw),
+            raw_text=raw,
+            model=self._llm.model,
+            usage=_usage_dict(response),
         )
 
 

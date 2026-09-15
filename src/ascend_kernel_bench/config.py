@@ -1,23 +1,38 @@
-"""Hardware profile and evaluation configuration loading."""
+"""Hardware profile and evaluation configuration loading.
+
+YAML files are parsed with PyYAML, then validated by frozen Pydantic
+models so required fields, defaults, and unknown-key ignoring live in
+one place instead of hand-written ``from_dict`` mapping.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ._paths import EVAL_DEFAULT_CONFIG, HARDWARE_DIR
 
 
-@dataclass(frozen=True)
-class HardwareProfile:
+def _default_tolerances() -> dict[str, dict[str, float]]:
+    """Return the KernelBench-style per-precision comparison tolerances."""
+    return {
+        "fp32": {"atol": 1e-4, "rtol": 1e-4},
+        "fp16": {"atol": 1e-2, "rtol": 1e-2},
+        "bf16": {"atol": 1e-2, "rtol": 1e-2},
+    }
+
+
+class HardwareProfile(BaseModel):
     """Hardware profile: CMake arch for builds, specs for prompts and SOL.
 
     See docs/reference/configuration.md.
     """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     name: str
     soc_version: str
@@ -27,11 +42,21 @@ class HardwareProfile:
     l2_cache_mb: int = 0
     hbm_gb: int = 0
     memory_bandwidth_gbps: float = 0.0
-    supported_dtypes: list[str] = field(default_factory=list)
+    supported_dtypes: list[str] = Field(default_factory=list)
     api_style: str = ""
     cube_core_num: int = 0
     vector_core_num: int = 0
-    peak_tflops: dict[str, float] = field(default_factory=dict)
+    peak_tflops: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("peak_tflops", mode="before")
+    @classmethod
+    def _coerce_peak_tflops(cls, value: object) -> dict[str, float]:
+        """Accept missing, empty, or loosely typed peak-TFLOPS mappings."""
+        if not value:
+            return {}
+        if not isinstance(value, Mapping):
+            return {}
+        return {str(key): float(item) for key, item in value.items()}
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> HardwareProfile:
@@ -42,27 +67,8 @@ class HardwareProfile:
 
         Returns:
             An immutable :class:`HardwareProfile`.
-
-        Raises:
-            KeyError: If a required field is missing.
         """
-        raw_peaks = data.get("peak_tflops") or {}
-        peaks = {str(key): float(value) for key, value in raw_peaks.items()}
-        return cls(
-            name=str(data["name"]),
-            soc_version=str(data["soc_version"]),
-            cmake_arch=str(data["cmake_arch"]),
-            ai_core_num=int(data["ai_core_num"]),
-            ub_size_kb=int(data["ub_size_kb"]),
-            l2_cache_mb=int(data.get("l2_cache_mb", 0)),
-            hbm_gb=int(data.get("hbm_gb", 0)),
-            memory_bandwidth_gbps=float(data.get("memory_bandwidth_gbps", 0)),
-            supported_dtypes=list(data.get("supported_dtypes", [])),
-            api_style=str(data.get("api_style", "")),
-            cube_core_num=int(data.get("cube_core_num", 0)),
-            vector_core_num=int(data.get("vector_core_num", 0)),
-            peak_tflops=peaks,
-        )
+        return cls.model_validate(data)
 
     def peak_tflops_for(self, precision: str) -> float:
         """Return datasheet peak TFLOPS for ``precision``, or 0.0.
@@ -76,19 +82,16 @@ class HardwareProfile:
         return float(self.peak_tflops.get(precision, 0.0) or 0.0)
 
 
-@dataclass(frozen=True)
-class EvalConfig:
+class EvalConfig(BaseModel):
     """Evaluation defaults (docs/reference/configuration.md)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     hardware: str = "ascend910b2"
     num_correct_trials: int = 5
     seed: int = 42
-    tolerances: dict[str, dict[str, float]] = field(
-        default_factory=lambda: {
-            "fp32": {"atol": 1e-4, "rtol": 1e-4},
-            "fp16": {"atol": 1e-2, "rtol": 1e-2},
-            "bf16": {"atol": 1e-2, "rtol": 1e-2},
-        }
+    tolerances: dict[str, dict[str, float]] = Field(
+        default_factory=_default_tolerances
     )
     precision: str = "fp32"
     num_perf_trials: int = 100
@@ -96,7 +99,13 @@ class EvalConfig:
     excessive_speedup: float = 10.0
     build_timeout: int = 600
     eval_timeout: int = 300
-    generation: dict[str, Any] = field(default_factory=dict)
+    generation: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("generation", mode="before")
+    @classmethod
+    def _generation_mapping(cls, value: object) -> dict[str, Any]:
+        """Treat a missing or null ``generation`` block as an empty mapping."""
+        return value if isinstance(value, dict) else {}
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> EvalConfig:
@@ -108,9 +117,7 @@ class EvalConfig:
         Returns:
             An immutable :class:`EvalConfig`.
         """
-        known = set(cls.__dataclass_fields__)
-        filtered = {key: value for key, value in data.items() if key in known}
-        return cls(**filtered)
+        return cls.model_validate(data)
 
 
 def load_hardware_profile(name_or_path: str) -> HardwareProfile:

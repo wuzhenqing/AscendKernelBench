@@ -12,6 +12,7 @@ dependencies = [
     "openai",
     "pydantic",
     "rich",
+    "loguru",
     "pyyaml",
     "numpy",
 ]

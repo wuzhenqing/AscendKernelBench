@@ -98,6 +98,9 @@ def main(argv: list[str]) -> None:
     Args:
         argv: ``[prog, cfg.json]``.
     """
+    from .log import setup_logging
+
+    setup_logging(rich_tracebacks=False)
     cfg = load_cfg_argv(argv)
     out_path = pop_required_path(cfg, "out_path")
     stats = measure_reference(cfg)
