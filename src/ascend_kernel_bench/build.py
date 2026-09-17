@@ -3,13 +3,18 @@
 Writes ``custom_op.asc`` into the sample directory, compiles it with the
 fixed CMake template, and loads the resulting shared library with
 ``torch.ops.load_library``. Nothing is installed globally.
+
+The CMake backend follows the official asc-devkit torch.library sample
+(CANN >= 9.1). If a future torch_npu ships an AscendC-aware
+``cpp_extension`` (``load_inline``-style JIT for ``.asc`` sources), this
+module's two entry points — ``build_custom_op`` / ``load_custom_op`` —
+are the only surface that needs to change.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
-import shutil
 import subprocess
 import sys
 from functools import lru_cache
@@ -66,6 +71,11 @@ def build_custom_op(
 ) -> Path:
     """Write ``custom_op.asc`` into ``work_dir`` and build ``libcustom_op.so``.
 
+    The sample directory doubles as the build cache: sources are written
+    only when their content changes, and CMake configure is skipped when
+    the existing cache already matches the request, so re-evaluating an
+    unchanged sample is an incremental no-op build.
+
     Args:
         asc_source: Generated Ascend C source.
         work_dir: Sample directory that will hold sources and ``.so``.
@@ -80,37 +90,49 @@ def build_custom_op(
     """
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
-    (work_dir / "custom_op.asc").write_text(asc_source, encoding="utf-8")
-    shutil.copy(
-        BUILD_TEMPLATE_DIR / "CMakeLists.txt", work_dir / "CMakeLists.txt"
+    # Write only on content change (torch's _maybe_write pattern): the
+    # sample dir doubles as the build cache, so an unchanged source lets
+    # make skip the Ascend C recompile on re-evaluation.
+    _write_if_changed(work_dir / "custom_op.asc", asc_source)
+    _write_if_changed(
+        work_dir / "CMakeLists.txt",
+        (BUILD_TEMPLATE_DIR / "CMakeLists.txt").read_text(encoding="utf-8"),
     )
 
     build_dir = work_dir / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
     env = cann_env()
     env.setdefault("ASCEND_SLOG_PRINT_TO_STDOUT", "0")
-
-    configure_cmd = [
-        "cmake",
-        "-S",
-        str(work_dir),
-        "-B",
-        str(build_dir),
-        f"-DCMAKE_ASC_ARCHITECTURES={cmake_arch}",
-        f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={work_dir}",
-        f"-DPython3_EXECUTABLE={sys.executable}",
-    ]
-    if os.environ.get("AKB_ENABLE_CCACHE", "").strip().lower() in {
+    enable_ccache = os.environ.get("AKB_ENABLE_CCACHE", "").strip().lower() in {
         "1",
         "true",
         "yes",
         "on",
-    }:
-        configure_cmd.append("-DENABLE_CCACHE=ON")
+    }
 
-    _run_cmake(
-        "configure", configure_cmd, cwd=work_dir, env=env, timeout_s=timeout_s
-    )
+    # Configure is idempotent; skip it when the existing cache already
+    # matches this request. A changed CMakeLists.txt still triggers CMake's
+    # own re-configure during the build step.
+    if not _cmake_cache_matches(build_dir, cmake_arch, enable_ccache):
+        configure_cmd = [
+            "cmake",
+            "-S",
+            str(work_dir),
+            "-B",
+            str(build_dir),
+            f"-DCMAKE_ASC_ARCHITECTURES={cmake_arch}",
+            f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={work_dir}",
+            f"-DPython3_EXECUTABLE={sys.executable}",
+        ]
+        if enable_ccache:
+            configure_cmd.append("-DENABLE_CCACHE=ON")
+        _run_cmake(
+            "configure",
+            configure_cmd,
+            cwd=work_dir,
+            env=env,
+            timeout_s=timeout_s,
+        )
     _run_cmake(
         "build",
         ["cmake", "--build", str(build_dir), "-j"],
@@ -119,6 +141,37 @@ def build_custom_op(
         timeout_s=timeout_s,
     )
     return find_built_library(work_dir)
+
+
+def _cmake_cache_matches(
+    build_dir: Path, cmake_arch: str, enable_ccache: bool
+) -> bool:
+    """Return True when the existing configure cache matches this request."""
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.is_file():
+        return False
+    values: dict[str, str] = {}
+    text = cache.read_text(encoding="utf-8", errors="replace")
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            values[key.split(":", 1)[0]] = value
+    return (
+        values.get("CMAKE_ASC_ARCHITECTURES") == cmake_arch
+        and values.get("Python3_EXECUTABLE") == sys.executable
+        and values.get("ENABLE_CCACHE") == ("ON" if enable_ccache else "OFF")
+    )
+
+
+def _write_if_changed(path: Path, content: str) -> None:
+    """Write ``content`` to ``path`` only when it differs.
+
+    Preserves mtime for unchanged content so the CMake build stays
+    incremental across evaluations of the same sample.
+    """
+    if path.is_file() and path.read_text(encoding="utf-8") == content:
+        return
+    path.write_text(content, encoding="utf-8")
 
 
 def find_built_library(work_dir: Path) -> Path:

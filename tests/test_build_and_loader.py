@@ -1,5 +1,8 @@
 """ACLNN build contract: process-local .so, no global install."""
 
+import os
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -9,6 +12,8 @@ from ascend_kernel_bench.build import (
     SHARED_LIBRARY_NAME,
     BuildError,
     LoadError,
+    _cmake_cache_matches,
+    _write_if_changed,
     build_custom_op,
     find_built_library,
     load_custom_op,
@@ -27,6 +32,44 @@ def test_cmake_template_is_process_local() -> None:
     assert "find_package(pybind11" not in text
     assert "pybind11::module" not in text
     assert "torch.ops.load_library" in text
+
+
+def test_cmake_template_ccache_covers_asc() -> None:
+    # The .asc translation unit dominates build time; the ccache option must
+    # cover the ASC compiler, not only the C/CXX launchers.
+    text = (BUILD_TEMPLATE_DIR / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "CMAKE_ASC_COMPILER_LAUNCHER" in text
+
+
+def test_write_if_changed_preserves_mtime(tmp_path: Path) -> None:
+    target = tmp_path / "custom_op.asc"
+    _write_if_changed(target, "kernel v1")
+    old_mtime = os.stat(target).st_mtime_ns
+    time.sleep(0.01)
+    _write_if_changed(target, "kernel v1")
+    assert os.stat(target).st_mtime_ns == old_mtime
+
+
+def test_write_if_changed_updates_on_change(tmp_path: Path) -> None:
+    target = tmp_path / "custom_op.asc"
+    _write_if_changed(target, "kernel v1")
+    _write_if_changed(target, "kernel v2")
+    assert target.read_text(encoding="utf-8") == "kernel v2"
+
+
+def test_cmake_cache_matches(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    assert not _cmake_cache_matches(build_dir, "dav-2201", False)
+    (build_dir / "CMakeCache.txt").write_text(
+        "CMAKE_ASC_ARCHITECTURES:STRING=dav-2201\n"
+        f"Python3_EXECUTABLE:UNINITIALIZED={sys.executable}\n"
+        "ENABLE_CCACHE:BOOL=OFF\n",
+        encoding="utf-8",
+    )
+    assert _cmake_cache_matches(build_dir, "dav-2201", False)
+    assert not _cmake_cache_matches(build_dir, "dav-3510", False)
+    assert not _cmake_cache_matches(build_dir, "dav-2201", True)
 
 
 def test_find_built_library_prefers_sample_dir(tmp_path: Path) -> None:

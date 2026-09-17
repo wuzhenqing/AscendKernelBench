@@ -43,12 +43,14 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Optional ccache (same switch as the official ACLNN operator-project samples).
-# Enable from the evaluator with -DENABLE_CCACHE=ON.
+# Enable from the evaluator with -DENABLE_CCACHE=ON. The ASC launcher matters
+# most: compiling the .asc translation unit dominates the build time.
 option(ENABLE_CCACHE "Enable ccache compiler launcher" OFF)
 if(ENABLE_CCACHE)
     find_program(CCACHE_PROGRAM ccache)
     if(CCACHE_PROGRAM)
         message(STATUS "[ccache] Enabled: ${CCACHE_PROGRAM}")
+        set(CMAKE_ASC_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
         set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
         set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
     else()
