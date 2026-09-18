@@ -1,5 +1,22 @@
 # AscendKernelBench
 
+```text
+/======================================================================\
+|                                                                      |
+|    +---------+        ___    __ __    ____                           |
+|    |# # # # #|       /   |  / //_/   / __ )                          |
+|    |#  NPU  #|      / /| | / ,<     / __  |                          |
+|    |# CORE  #|     / ___ |/ /| |   / /_/ /                           |
+|    +---------+    /_/  |_/_/ |_|  /_____/                            |
+|                                                                      |
+|              A S C E N D     K E R N E L     B E N C H               |
+|                                                                      |
+|        [ LLM ]=======>{ Ascend C }=======>{ libcustom_op.so }        |
+|                 fast_p   |   pass@k   |   SOL score                  |
+|                                                                      |
+\======================================================================/
+```
+
 [![Quality](https://github.com/wuzhenqing/AscendKernelBench/actions/workflows/quality.yml/badge.svg)](https://github.com/wuzhenqing/AscendKernelBench/actions/workflows/quality.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)

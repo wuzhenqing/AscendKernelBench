@@ -1,5 +1,22 @@
 # Documentation
 
+```text
+/======================================================================\
+|                                                                      |
+|    +---------+        ___    __ __    ____                           |
+|    |# # # # #|       /   |  / //_/   / __ )                          |
+|    |#  NPU  #|      / /| | / ,<     / __  |                          |
+|    |# CORE  #|     / ___ |/ /| |   / /_/ /                           |
+|    +---------+    /_/  |_/_/ |_|  /_____/                            |
+|                                                                      |
+|              A S C E N D     K E R N E L     B E N C H               |
+|                                                                      |
+|        [ LLM ]=======>{ Ascend C }=======>{ libcustom_op.so }        |
+|                 fast_p   |   pass@k   |   SOL score                  |
+|                                                                      |
+\======================================================================/
+```
+
 Guides and references for running AscendKernelBench. These pages live in
 the repository and are meant to be read on GitHub. There is no published
 documentation site.
