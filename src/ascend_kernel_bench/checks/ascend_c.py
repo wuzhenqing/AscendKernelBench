@@ -1,4 +1,4 @@
-"""Static checks for generated ``custom_op.asc`` source."""
+"""Static checks for generated custom_op.asc source."""
 
 from __future__ import annotations
 
@@ -78,6 +78,7 @@ _ASC_COMPUTE_METHODS = (
     "conv3d",
 )
 
+########################### BANNED PATTERN CATALOG ###########################
 ASC_BANNED_RULES: tuple[PatternRule, ...] = (
     PatternRule(
         (r"\baclnn[A-Z]\w*",),
@@ -120,6 +121,7 @@ ASC_BANNED_RULES: tuple[PatternRule, ...] = (
         include_match=True,
     ),
 )
+########################### BANNED PATTERN CATALOG ###########################
 
 
 def _check_asc_binding(code: str) -> list[str]:
@@ -179,7 +181,7 @@ def _check_asc_aten(code: str) -> list[str]:
 
 
 def _check_asc_methods(code: str) -> list[str]:
-    """Flag host-side tensor compute methods (``.relu()``, ``->matmul()``)."""
+    """Flag host-side tensor compute methods (.relu(), ->matmul())."""
     method_re = r"(?:\.|->)(" + "|".join(_ASC_COMPUTE_METHODS) + r")\s*\("
     bad_methods = sorted(
         {match.group(1) for match in re.finditer(method_re, code)}
@@ -192,17 +194,10 @@ def _check_asc_methods(code: str) -> list[str]:
 
 
 def check_custom_op_asc(source: str) -> list[str]:
-    """Return static-check violations for generated ``custom_op.asc`` source.
-
-    The host wrapper may allocate outputs and launch kernels; all compute must
-    be inside the ``__global__ __vector__`` Ascend C kernel. Bind the operator
-    with ``TORCH_LIBRARY(custom_op, ...)`` and
-    ``TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, ...)`` so the evaluator can
-    ``torch.ops.load_library`` ``libcustom_op.so``. ATen compute calls, vendor
-    prebuilt ops (aclnn/aclop), pybind11, and host side effects are banned.
+    """Return static-check violations for generated custom_op.asc source.
 
     Args:
-        source: Raw ``custom_op.asc`` text.
+        source: Raw custom_op.asc text.
 
     Returns:
         Deduplicated human-readable violations; empty means pass.

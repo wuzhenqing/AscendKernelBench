@@ -16,15 +16,8 @@ from loguru import logger
 def pop_required_path(cfg: dict[str, Any], key: str) -> Path:
     """Pop a required filesystem path from a worker config.
 
-    Args:
-        cfg: Mutable worker configuration.
-        key: Key whose value must be a nonempty string path.
-
-    Returns:
-        The path value.
-
     Raises:
-        SystemExit: If ``key`` is missing or not a nonempty string.
+        SystemExit: If the key is missing or not a nonempty string.
     """
     raw = cfg.pop(key, None)
     if not isinstance(raw, str) or not raw.strip():
@@ -34,13 +27,7 @@ def pop_required_path(cfg: dict[str, Any], key: str) -> Path:
 
 
 def load_cfg_argv(argv: list[str]) -> dict[str, Any]:
-    """Read a worker ``cfg.json`` path from ``argv``.
-
-    Args:
-        argv: ``[prog, cfg.json]``.
-
-    Returns:
-        Parsed configuration mapping.
+    """Read the worker cfg.json path from argv and return the parsed object.
 
     Raises:
         SystemExit: If the argument list or file is unusable.
@@ -56,16 +43,10 @@ def load_cfg_argv(argv: list[str]) -> dict[str, Any]:
 
 
 def read_json_object(path: Path) -> dict[str, Any]:
-    """Read a UTF-8 JSON object from ``path``.
-
-    Args:
-        path: Existing JSON file.
-
-    Returns:
-        The parsed object.
+    """Read a UTF-8 JSON object from path.
 
     Raises:
-        FileNotFoundError: If ``path`` does not exist.
+        FileNotFoundError: If path does not exist.
         json.JSONDecodeError: If the file is not valid JSON.
         ValueError: If the top-level value is not an object.
     """
@@ -76,12 +57,7 @@ def read_json_object(path: Path) -> dict[str, Any]:
 
 
 def _write_text_atomic(path: Path, text: str) -> None:
-    """Write UTF-8 ``text`` via a sibling temp file, fsync, and ``os.replace``.
-
-    Args:
-        path: Destination path. Missing parents are created.
-        text: File contents.
-    """
+    """Write UTF-8 text via a sibling temp file, fsync, then os.replace."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -98,22 +74,12 @@ def _write_text_atomic(path: Path, text: str) -> None:
 
 
 def write_json_atomic(path: Path, payload: Any) -> None:
-    """Write ``payload`` as UTF-8 JSON via a temp file and ``os.replace``.
-
-    Args:
-        path: Destination path. Missing parents are created.
-        payload: Any JSON-serializable object.
-    """
+    """Write payload as UTF-8 JSON via a temp file and os.replace."""
     _write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def write_yaml_atomic(path: Path, payload: Any) -> None:
-    """Write ``payload`` as UTF-8 YAML via a temp file and ``os.replace``.
-
-    Args:
-        path: Destination path. Missing parents are created.
-        payload: Any object accepted by ``yaml.safe_dump``.
-    """
+    """Write payload as UTF-8 YAML via a temp file and os.replace."""
     _write_text_atomic(
         path, yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
     )

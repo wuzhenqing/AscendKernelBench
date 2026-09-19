@@ -1,8 +1,4 @@
-"""Static anti-cheat checks (implementation in :mod:`.checks`).
-
-See :mod:`ascend_kernel_bench.checks` for the policy and the split
-between regex catalogs, the Python AST visitor, and Ascend C rules.
-"""
+"""Static anti-cheat checks; the policy lives in checks.py."""
 
 from .checks import check_custom_op_asc, check_model_new
 

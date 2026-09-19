@@ -1,4 +1,4 @@
-"""Put the checkout ``src/`` directory on ``sys.path`` for CLI scripts."""
+"""Put the checkout src directory on sys.path for CLI scripts."""
 
 from __future__ import annotations
 

@@ -1,14 +1,7 @@
-"""Build and load a process-local ``libcustom_op.so``.
+"""Build and load a process-local libcustom_op.so, installing nothing.
 
-Writes ``custom_op.asc`` into the sample directory, compiles it with the
-fixed CMake template, and loads the resulting shared library with
-``torch.ops.load_library``. Nothing is installed globally.
-
-The CMake backend follows the official asc-devkit torch.library sample
-(CANN >= 9.1). If a future torch_npu ships an AscendC-aware
-``cpp_extension`` (``load_inline``-style JIT for ``.asc`` sources), this
-module's two entry points — ``build_custom_op`` / ``load_custom_op`` —
-are the only surface that needs to change.
+Writes custom_op.asc into the sample directory, compiles it with the fixed
+CMake template, and loads the result with torch.ops.load_library.
 """
 
 from __future__ import annotations
@@ -27,7 +20,7 @@ DEFAULT_CANN_SET_ENV = "/usr/local/Ascend/cann-9.1.0/set_env.sh"
 
 
 class BuildError(RuntimeError):
-    """Raised when configure or build fails; message carries compiler output."""
+    """Raised when CMake configure or build fails, with compiler output."""
 
 
 class LoadError(RuntimeError):
@@ -36,10 +29,10 @@ class LoadError(RuntimeError):
 
 @lru_cache(maxsize=1)
 def cann_env() -> dict[str, str]:
-    """Capture the environment produced by sourcing CANN's set_env.sh.
+    """Return the environment produced by sourcing CANN set_env.sh.
 
-    Cached per process. Set ``CANN_SET_ENV`` to override the script path.
-    If that file is missing, the current environment is used as-is.
+    Cached per process. CANN_SET_ENV overrides the script path; a missing
+    script falls back to the current environment.
     """
     set_env = os.environ.get("CANN_SET_ENV", DEFAULT_CANN_SET_ENV)
     if not Path(set_env).is_file():
@@ -69,50 +62,45 @@ def build_custom_op(
     cmake_arch: str,
     timeout_s: int = 600,
 ) -> Path:
-    """Write ``custom_op.asc`` into ``work_dir`` and build ``libcustom_op.so``.
+    """Write custom_op.asc into work_dir and build libcustom_op.so.
 
-    The sample directory doubles as the build cache: sources are written
-    only when their content changes, and CMake configure is skipped when
-    the existing cache already matches the request, so re-evaluating an
-    unchanged sample is an incremental no-op build.
-
-    Args:
-        asc_source: Generated Ascend C source.
-        work_dir: Sample directory that will hold sources and ``.so``.
-        cmake_arch: Value passed to ``CMAKE_ASC_ARCHITECTURES``.
-        timeout_s: Separate budget for configure and for build.
+    The sample directory doubles as the build cache, so an unchanged sample
+    is an incremental no-op build. cmake_arch is passed as
+    CMAKE_ASC_ARCHITECTURES, and timeout_s covers configure and build
+    separately.
 
     Returns:
         Path to the process-local shared library.
 
     Raises:
-        BuildError: If CMake fails or no ``.so`` is produced.
+        BuildError: If CMake fails or no .so is produced.
     """
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
-    # Write only on content change (torch's _maybe_write pattern): the
-    # sample dir doubles as the build cache, so an unchanged source lets
-    # make skip the Ascend C recompile on re-evaluation.
+    # Write only on content change, so cmake/make can skip the Ascend C
+    # recompile when a sample is re-evaluated unchanged.
     _write_if_changed(work_dir / "custom_op.asc", asc_source)
     _write_if_changed(
         work_dir / "CMakeLists.txt",
         (BUILD_TEMPLATE_DIR / "CMakeLists.txt").read_text(encoding="utf-8"),
     )
 
+    ##################### BUILD PATH #####################
     build_dir = work_dir / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
     env = cann_env()
     env.setdefault("ASCEND_SLOG_PRINT_TO_STDOUT", "0")
-    enable_ccache = os.environ.get("AKB_ENABLE_CCACHE", "").strip().lower() in {
+    enable_ccache = os.environ.get(
+        "ASCEND_KERNEL_BENCH_ENABLE_CCACHE", ""
+    ).strip().lower() in {
         "1",
         "true",
         "yes",
         "on",
     }
 
-    # Configure is idempotent; skip it when the existing cache already
-    # matches this request. A changed CMakeLists.txt still triggers CMake's
-    # own re-configure during the build step.
+    # Configure is idempotent: skip it when the cache matches this request.
+    # CMake re-configures during the build step when CMakeLists.txt changed.
     if not _cmake_cache_matches(build_dir, cmake_arch, enable_ccache):
         configure_cmd = [
             "cmake",
@@ -140,6 +128,7 @@ def build_custom_op(
         env=env,
         timeout_s=timeout_s,
     )
+    ##################### BUILD PATH #####################
     return find_built_library(work_dir)
 
 
@@ -164,18 +153,14 @@ def _cmake_cache_matches(
 
 
 def _write_if_changed(path: Path, content: str) -> None:
-    """Write ``content`` to ``path`` only when it differs.
-
-    Preserves mtime for unchanged content so the CMake build stays
-    incremental across evaluations of the same sample.
-    """
+    """Write content to path only when it differs, preserving the mtime."""
     if path.is_file() and path.read_text(encoding="utf-8") == content:
         return
     path.write_text(content, encoding="utf-8")
 
 
 def find_built_library(work_dir: Path) -> Path:
-    """Return ``libcustom_op.so`` from ``work_dir`` or ``work_dir/build``."""
+    """Return libcustom_op.so from work_dir or work_dir/build."""
     work_dir = Path(work_dir)
     for candidate in (
         work_dir / SHARED_LIBRARY_NAME,
@@ -190,15 +175,14 @@ def find_built_library(work_dir: Path) -> Path:
 
 
 def load_custom_op(so_path: Path, source: str = "") -> None:
-    """Load ``so_path`` so ``torch.ops.custom_op.*`` becomes callable.
+    """Load so_path so torch.ops.custom_op.* becomes callable.
 
-    Args:
-        so_path: Process-local ``libcustom_op.so``.
-        source: Optional ``custom_op.asc`` text used for a fast marker check.
+    source, when given, is custom_op.asc text checked for a TORCH_LIBRARY
+    marker.
 
     Raises:
-        LoadError: If the file is missing, lacks ``TORCH_LIBRARY``, or
-            ``torch.ops.load_library`` fails.
+        LoadError: If the file is missing, lacks TORCH_LIBRARY, or fails
+            to load.
     """
     so_path = Path(so_path).resolve()
     if not so_path.is_file():

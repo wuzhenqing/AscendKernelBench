@@ -1,13 +1,8 @@
 #!/usr/bin/env python
 """Measure torch_npu eager baselines and archive them per hardware.
 
-Baselines are measured on this machine (docs/guide/evaluation.md) and
-archived to results/baseline/{hardware}/{task_slug}.json so runs stay
-comparable across sessions. Evaluation itself always re-measures the
-reference live in the same worker; the archive is the cross-run record.
-
-Example:
-    python scripts/baseline.py --level 1 --hardware ascend910b2 --device npu:0
+Baselines land in results/baseline/{hardware}/{task_slug}.json as the cross-run
+record; evaluation still re-measures the reference live in the same worker.
 """
 
 from __future__ import annotations
@@ -45,19 +40,12 @@ def measure_baseline(
 ) -> dict:
     """Measure one task's reference runtime in an isolated subprocess.
 
-    Args:
-        task: Loaded KernelBench task.
-        config: Evaluation timeouts, seed, precision, and trial counts.
-        device: Runtime device string, for example ``npu:0``.
-        out_path: Archive path under ``results/baseline/``.
-        l2_clear_size: L2 flush buffer size forwarded to the worker.
-
     Returns:
-        Timing statistics written to ``out_path``.
+        Timing statistics written to out_path.
 
     Raises:
-        RuntimeError: If the worker process exits non-zero.
-        subprocess.TimeoutExpired: If the worker exceeds ``eval_timeout``.
+        RuntimeError: If the worker process fails or returns no payload.
+        subprocess.TimeoutExpired: If the worker exceeds eval_timeout.
     """
     outcome = IsolatedJsonWorker.for_baseline(config.eval_timeout).run(
         {
@@ -83,7 +71,7 @@ def measure_baseline(
 
 
 def main() -> None:
-    """Archive eager ``torch_npu`` baselines for the selected tasks."""
+    """Archive eager torch_npu baselines for the selected tasks."""
     setup_logging()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--level", type=int, default=None)

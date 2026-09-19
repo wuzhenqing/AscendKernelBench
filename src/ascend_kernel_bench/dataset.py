@@ -1,12 +1,7 @@
 """Task discovery, loading and contract validation.
 
-The task set IS the vendored KernelBench copy under ``KernelBench/`` — 270
-problems in four levels, already committed to this repository. Tasks are used
-in place, in the original KernelBench single-file format: ``Model``,
-``get_inputs()``, ``get_init_inputs()``; optional ``TOLERANCE`` dict and
-``custom_check(ref, out)`` override. No per-task specification document: the
-benchmark measures whether the LLM can map a PyTorch reference to Ascend C
-from the model source alone, mirroring KernelBench's trust in the model.
+The task set is the vendored KernelBench copy under KernelBench/, used in
+place in its original single-file format, checked by an AST contract.
 """
 
 from __future__ import annotations
@@ -18,7 +13,6 @@ from pathlib import Path
 
 from ._paths import KB_ROOT
 
-# Vendored KernelBench corpus committed under KernelBench/.
 KERNELBENCH_TASK_COUNT = 270
 KERNELBENCH_LEVEL_COUNTS = {1: 100, 2: 100, 3: 50, 4: 20}
 
@@ -30,28 +24,20 @@ STEM_NUM_RE = re.compile(r"^(?P<num>\d+)_")
 class Task:
     """A single benchmark task backed by one KernelBench source file."""
 
-    task_id: str  # e.g. "level1/19_ReLU"
+    task_id: str  # e.g. level1/19_ReLU
     level: int
-    name: str  # file stem, e.g. "19_ReLU"
-    path: Path  # the .py file itself
+    name: str
+    path: Path
     task_py: str
 
     @property
     def problem_id(self) -> str:
-        """KernelBench problem id stored in ``eval_results.json``."""
+        """KernelBench problem id stored in eval_results.json."""
         return self.task_id
 
 
 def _validate_contract(task_py: str, task_id: str) -> None:
-    """Statically verify the task contract without executing task code.
-
-    Args:
-        task_py: Source of the KernelBench task file.
-        task_id: Identifier used in error messages.
-
-    Raises:
-        ValueError: If the file does not parse or lacks required symbols.
-    """
+    """Statically verify the task contract without executing task code."""
     try:
         tree = ast.parse(task_py)
     except SyntaxError as exc:
@@ -74,17 +60,10 @@ def _validate_contract(task_py: str, task_id: str) -> None:
 
 
 def load_task(task_id: str, kb_root: Path | None = None) -> Task:
-    """Load one task by id (``level{L}/{file_stem}``).
-
-    Args:
-        task_id: Identifier such as ``level1/19_ReLU``.
-        kb_root: Optional KernelBench root. Defaults to the vendored tree.
-
-    Returns:
-        A :class:`Task` with source and path populated.
+    """Load one task by id (level{L}/{file_stem}).
 
     Raises:
-        ValueError: If ``task_id`` is malformed or the contract is missing.
+        ValueError: If task_id is malformed or the contract is missing.
         FileNotFoundError: If the task file does not exist.
     """
     root = Path(kb_root) if kb_root else KB_ROOT
@@ -112,7 +91,7 @@ def load_task(task_id: str, kb_root: Path | None = None) -> Task:
 
 
 def _sort_key(path: Path) -> tuple[int, str]:
-    """Return a numeric-then-name sort key for ``19_ReLU.py``-style stems."""
+    """Return a numeric-then-name sort key for numbered task stems."""
     match = STEM_NUM_RE.match(path.stem)
     return (int(match.group("num")) if match else 0, path.stem)
 
@@ -120,14 +99,9 @@ def _sort_key(path: Path) -> tuple[int, str]:
 def discover_tasks(
     level: int | None = None, kb_root: Path | None = None
 ) -> list[Task]:
-    """Discover all tasks (optionally one level) under the KernelBench root.
+    """Discover tasks under the KernelBench root, sorted by level and stem.
 
-    Args:
-        level: When set, only that ``levelN`` directory is scanned.
-        kb_root: Optional KernelBench root. Defaults to the vendored tree.
-
-    Returns:
-        Tasks sorted by level directory, then numeric file stem.
+    With level set, only that levelN directory is scanned.
     """
     root = Path(kb_root) if kb_root else KB_ROOT
     tasks: list[Task] = []

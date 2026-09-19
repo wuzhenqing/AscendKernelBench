@@ -1,8 +1,7 @@
 """Hardware profile and evaluation configuration loading.
 
-YAML files are parsed with PyYAML, then validated by frozen Pydantic
-models so required fields, defaults, and unknown-key ignoring live in
-one place instead of hand-written ``from_dict`` mapping.
+YAML is parsed with PyYAML and validated by frozen Pydantic models, so
+required fields, defaults, and unknown-key handling live in one place.
 """
 
 from __future__ import annotations
@@ -27,10 +26,7 @@ def _default_tolerances() -> dict[str, dict[str, float]]:
 
 
 class HardwareProfile(BaseModel):
-    """Hardware profile: CMake arch for builds, specs for prompts and SOL.
-
-    See docs/reference/configuration.md.
-    """
+    """Hardware profile: CMake arch for builds, specs for prompts and SOL."""
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -60,30 +56,20 @@ class HardwareProfile(BaseModel):
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> HardwareProfile:
-        """Build a profile from a hardware YAML mapping.
-
-        Args:
-            data: Mapping loaded from ``configs/hardware/*.yaml``.
-
-        Returns:
-            An immutable :class:`HardwareProfile`.
-        """
+        """Build a profile from a hardware YAML mapping."""
         return cls.model_validate(data)
 
     def peak_tflops_for(self, precision: str) -> float:
-        """Return datasheet peak TFLOPS for ``precision``, or 0.0.
+        """Return datasheet peak TFLOPS for precision, or 0.0 when unset.
 
         Args:
-            precision: One of ``fp32``, ``fp16``, ``bf16``.
-
-        Returns:
-            Peak TFLOPS from the profile, or 0.0 when unset.
+            precision: One of fp32, fp16, bf16.
         """
         return float(self.peak_tflops.get(precision, 0.0) or 0.0)
 
 
 class EvalConfig(BaseModel):
-    """Evaluation defaults (docs/reference/configuration.md)."""
+    """Evaluation defaults for one benchmark run."""
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -104,19 +90,12 @@ class EvalConfig(BaseModel):
     @field_validator("generation", mode="before")
     @classmethod
     def _generation_mapping(cls, value: object) -> dict[str, Any]:
-        """Treat a missing or null ``generation`` block as an empty mapping."""
+        """Treat a missing or null generation block as an empty mapping."""
         return value if isinstance(value, dict) else {}
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> EvalConfig:
-        """Build an eval config, ignoring unknown top-level keys.
-
-        Args:
-            data: Mapping loaded from an eval YAML file.
-
-        Returns:
-            An immutable :class:`EvalConfig`.
-        """
+        """Build an eval config, ignoring unknown top-level keys."""
         return cls.model_validate(data)
 
 
@@ -124,10 +103,7 @@ def load_hardware_profile(name_or_path: str) -> HardwareProfile:
     """Load a hardware profile by name or filesystem path.
 
     Args:
-        name_or_path: ``configs/hardware/<name>.yaml`` stem, or a file path.
-
-    Returns:
-        The loaded :class:`HardwareProfile`.
+        name_or_path: configs/hardware/<name>.yaml stem, or a file path.
 
     Raises:
         FileNotFoundError: If neither a path nor a named profile exists.
@@ -146,13 +122,7 @@ def load_hardware_profile(name_or_path: str) -> HardwareProfile:
 
 
 def load_eval_config(path: str | Path | None = None) -> EvalConfig:
-    """Load evaluation config; defaults to ``configs/eval_default.yaml``.
-
-    Args:
-        path: Optional YAML path. ``None`` uses the repository default.
-
-    Returns:
-        The loaded :class:`EvalConfig`.
+    """Load evaluation config; defaults to configs/eval_default.yaml.
 
     Raises:
         FileNotFoundError: If the resolved path does not exist.

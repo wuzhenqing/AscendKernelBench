@@ -1,10 +1,7 @@
 """AscendKernelBench evaluation engine.
 
-A library with separable modules for dataset, prompt, generation, static
-checks, isolated evaluation, timing, SOL scoring, and reporting. Host
-orchestration lives in ``eval.py``; the NPU worker body lives in
-``eval_device.py``. Logging uses loguru; CLIs also use Rich. See
-docs/reference/architecture.md.
+Host orchestration is eval.py, the NPU worker body is eval_device.py; the
+rest covers dataset, prompt, generation, checks, timing, and scoring.
 """
 
 from .eval import evaluate_run

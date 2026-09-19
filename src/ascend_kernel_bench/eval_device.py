@@ -1,9 +1,7 @@
 """Worker-side build, correctness, and timing for one sample.
 
-Runs inside the isolated subprocess started by :func:`eval.evaluate_run`.
-The stages (build, load, correctness, timing, re-check) live on
-:class:`SampleEvaluator` so shared trial state is explicit. See
-docs/guide/evaluation.md for the protocol this module implements.
+Runs inside the isolated subprocess started by eval.evaluate_run; the
+stages live on SampleEvaluator so shared trial state is explicit.
 """
 
 from __future__ import annotations
@@ -70,7 +68,7 @@ def exec_python_source(
     filename: str,
     namespace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Execute ``source`` and return the namespace it populated."""
+    """Execute source and return the namespace it populated."""
     populated: dict[str, Any] = {} if namespace is None else namespace
     exec(compile(source, filename, "exec"), populated)
     return populated
@@ -99,7 +97,7 @@ class SampleEvaluator:
     """Stateful worker that evaluates one generated sample on the NPU."""
 
     def __init__(self, request: DeviceEvalRequest) -> None:
-        """Bind the request; runtime objects are filled during ``run``."""
+        """Bind the request; runtime objects are filled during run."""
         self.req = request
         self.sample_path = Path(request.sample_dir)
         self.so_path: Path | None = None
@@ -171,7 +169,7 @@ class SampleEvaluator:
         )
 
     def _build_and_load(self) -> dict[str, Any] | None:
-        """Compile and load ``libcustom_op.so``; fail-payload on error."""
+        """Compile and load libcustom_op.so; fail-payload on error."""
         asc_source = (self.sample_path / "custom_op.asc").read_text(
             encoding="utf-8"
         )
@@ -193,7 +191,7 @@ class SampleEvaluator:
         return None
 
     def _load_python_modules(self) -> dict[str, Any] | None:
-        """Exec the task and ``model_new.py``; fail-payload on error."""
+        """Exec the task and model_new.py; fail-payload on error."""
         try:
             self.ref_globals = exec_python_source(self.req.task_py, "<task.py>")
             self.model_cls = self.ref_globals["Model"]
@@ -291,6 +289,7 @@ class SampleEvaluator:
             self.ref_npu_error = f"trial {trial}: {exc!r}"
             return self._run_ref_cpu(raw_inputs)
 
+    ################################# TRIALS #################################
     def _run_correctness_trials(self) -> dict[str, Any] | None:
         """Run seeded correctness trials; hard-fail on runtime or mutation."""
         seed_torch(self.req.seed)
@@ -304,6 +303,8 @@ class SampleEvaluator:
                 if failed is not None:
                     return failed
         return None
+
+    ################################# TRIALS #################################
 
     def _one_correctness_trial(
         self, trial: int, trial_seed: int
@@ -366,6 +367,7 @@ class SampleEvaluator:
         if self.ref_npu_error:
             self.metadata["reference_npu_error"] = self.ref_npu_error
 
+    ################################# TIMING #################################
     def _time_both_models(self) -> None:
         """Time candidate and NPU reference; attach speedup and SOL metadata."""
 
@@ -436,6 +438,9 @@ class SampleEvaluator:
         except Exception as exc:
             self.metadata["runtime_error"] = f"timing failed: {exc!r}"
 
+    ################################# TIMING #################################
+
+    ################################ RECHECK #################################
     def _post_timing_recheck(self) -> dict[str, Any] | None:
         """Fail the sample if a fresh-input re-check mismatches or raises."""
         try:
@@ -463,3 +468,5 @@ class SampleEvaluator:
             )
             return self.metadata
         return None
+
+    ################################ RECHECK #################################

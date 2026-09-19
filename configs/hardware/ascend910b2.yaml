@@ -1,6 +1,5 @@
 # Ascend 910B2 (Atlas A2 series) hardware profile.
-# cmake_arch is injected into CMAKE_ASC_ARCHITECTURES at build time;
-# the remaining fields are injected into the prompt hardware block.
+# cmake_arch goes to CMAKE_ASC_ARCHITECTURES; other fields go to the prompt.
 name: ascend910b2
 soc_version: Ascend910B2
 cmake_arch: dav-2201

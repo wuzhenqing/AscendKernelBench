@@ -1,10 +1,6 @@
-# Local style gate for AscendKernelBench.
-# Install once:  python -m pip install -e ".[dev]" && pre-commit install
-# Run on demand: pre-commit run --all-files
-#
-# Ruff enforces PEP 8 (E/W) plus selected pyflakes/bugbear rules and
-# Google-convention pydocstyle (D). ruff-format keeps the 80-column
-# Google / PEP 8 wrap. Vendored KernelBench tasks are never rewritten.
+# Local style gate for AscendKernelBench: ruff (PEP 8, pyflakes, bugbear,
+# Google pydocstyle) and ruff-format at 80 columns. Vendored KernelBench
+# tasks are never rewritten. Install once with pip install -r requirements.txt.
 
 default_language_version:
   python: python3

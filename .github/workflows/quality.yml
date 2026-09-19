@@ -1,3 +1,7 @@
+# Quality gate: lint the tree and run the NPU-free unit tests.
+# Kernel compile and NPU timing are host-side validation, not CI gates:
+# GitHub runners have no Ascend hardware. See docs/guide/evaluation.md.
+
 name: Quality
 
 on:
@@ -16,13 +20,19 @@ concurrency:
 
 jobs:
   lint-and-test:
-    name: Lint and unit tests
+    name: Lint and unit tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the documented floor in pyproject.toml; 3.12 matches the
+        # Ascend experiment environment.
+        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install package and quality tools
         run: python -m pip install -e ".[dev]"
       - name: Run pre-commit on the whole tree

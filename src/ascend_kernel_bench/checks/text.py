@@ -1,4 +1,8 @@
-"""Comment stripping and string masking for static checks."""
+"""Comment stripping and string masking for static checks.
+
+Comments are blanked in place rather than re-rendered from tokens, since
+patterns such as import numpy depend on the original inter-token whitespace.
+"""
 
 from __future__ import annotations
 
@@ -11,12 +15,8 @@ import tokenize
 def mask_string_constants(source: str) -> str:
     """Blank string constants so embedded text cannot trip regex rules.
 
-    Args:
-        source: Python source.
-
     Returns:
-        Source with string literal spans replaced by spaces. Unparsable
-        input is returned unchanged.
+        Source with string spans blanked; unparsable input unchanged.
     """
     try:
         tree = ast.parse(source)
@@ -54,17 +54,10 @@ def mask_string_constants(source: str) -> str:
 
 
 def strip_python_comments(code: str) -> str:
-    """Blank Python ``#`` comments in place, preserving all other bytes.
-
-    Reconstruction from token strings would drop inter-token whitespace and
-    break space-sensitive patterns (``import numpy``), so comments are
-    replaced by spaces at their exact offsets instead.
+    """Blank Python # comments in place, preserving all other bytes.
 
     Args:
-        code: Python source, typically after string masking.
-
-    Returns:
-        Source with comments replaced by spaces.
+        code: Python source, usually after string masking.
     """
     lines = code.splitlines(keepends=True)
     offsets = [0]
@@ -89,14 +82,7 @@ def strip_python_comments(code: str) -> str:
 
 
 def strip_cpp_comments(code: str) -> str:
-    """Blank C++ comments so markers inside comments do not count.
-
-    Args:
-        code: Ascend C / C++ source.
-
-    Returns:
-        Source with ``/* */`` and ``//`` comments replaced by spaces.
-    """
+    """Blank C++ comments so markers inside comments do not count."""
     code = re.sub(
         r"/\*.*?\*/",
         lambda match: " " * (match.end() - match.start()),
@@ -111,24 +97,10 @@ def strip_cpp_comments(code: str) -> str:
 
 
 def prepare_python_source(source: str) -> str:
-    """Return comment-stripped, string-masked Python source.
-
-    Args:
-        source: Raw ``model_new.py`` text.
-
-    Returns:
-        Source suitable for regex catalogs.
-    """
+    """Return comment-stripped, string-masked Python source."""
     return strip_python_comments(mask_string_constants(source))
 
 
 def dedupe(violations: list[str]) -> list[str]:
-    """Return ``violations`` with first-occurrence order preserved.
-
-    Args:
-        violations: Human-readable check messages.
-
-    Returns:
-        Deduplicated list.
-    """
+    """Return violations with first-occurrence order preserved."""
     return list(dict.fromkeys(violations))

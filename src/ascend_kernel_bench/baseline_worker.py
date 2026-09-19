@@ -1,8 +1,7 @@
 """Isolated eager-reference timing worker for archived baselines.
 
-Evaluation always re-measures the live NPU reference in the same process as
-the candidate. This worker only archives ``torch_npu`` eager timings so
-runs stay comparable across sessions. See docs/guide/evaluation.md.
+Evaluation always re-measures the live NPU reference in the same process
+as the candidate; this worker only archives torch_npu eager timings.
 """
 
 from __future__ import annotations
@@ -23,16 +22,10 @@ from .timing import (
 
 
 def measure_reference(cfg: dict[str, Any]) -> dict[str, Any]:
-    """Time the task ``Model`` on NPU using the evaluation timing protocol.
-
-    Args:
-        cfg: Worker config with ``task_py``, ``device``, ``precision``,
-            ``seed``, ``num_warmup``, ``num_perf_trials``, and optional
-            ``l2_clear_size``.
+    """Time the task Model on NPU using the evaluation timing protocol.
 
     Returns:
-        Timing statistics plus ``supported_on_npu``. Unsupported eager
-        ops return ``supported_on_npu: False`` and an error string.
+        Timing statistics plus supported_on_npu; error string when unsupported.
     """
     import torch
     import torch_npu  # noqa: F401
@@ -72,6 +65,7 @@ def measure_reference(cfg: dict[str, Any]) -> dict[str, Any]:
             prev[0] = box[0]
             box[0] = draw()
 
+        ############################### TIMING ###############################
         seed_torch(cfg["seed"])
         torch.npu.synchronize(device=device)
         with torch.no_grad():
@@ -84,6 +78,7 @@ def measure_reference(cfg: dict[str, Any]) -> dict[str, Any]:
                 setup=refresh if fresh_per_trial else None,
                 l2_clear_size=l2_clear_size,
             )
+        ############################### TIMING ###############################
         stats = get_timing_stats(times)
         stats["supported_on_npu"] = True
         stats["timing_fresh_inputs"] = bool(fresh_per_trial)
@@ -93,11 +88,7 @@ def measure_reference(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def main(argv: list[str]) -> None:
-    """Read ``cfg.json``, time the reference, and write ``out_path``.
-
-    Args:
-        argv: ``[prog, cfg.json]``.
-    """
+    """Read cfg.json, time the reference, and write out_path."""
     from .log import setup_logging
 
     setup_logging(rich_tracebacks=False)

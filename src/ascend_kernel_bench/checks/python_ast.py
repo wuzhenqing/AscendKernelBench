@@ -1,4 +1,4 @@
-"""AST-level semantic checks for ``model_new.py``."""
+"""AST-level semantic checks for model_new.py."""
 
 from __future__ import annotations
 
@@ -188,11 +188,12 @@ _ARITH_OPS = (
 )
 
 
+################################ AST VISITOR #################################
 class WrapperSemantics(ast.NodeVisitor):
-    """AST checks for ``model_new.py``; see the checks package docstring."""
+    """AST checks for model_new.py."""
 
     def __init__(self, source: str) -> None:
-        """Parse ``source`` and populate ``violations``."""
+        """Parse source and populate violations."""
         self.violations: list[str] = []
         self.aliases: dict[str, str] = {}
         self.co_refs: set[str] = set()
@@ -226,7 +227,7 @@ class WrapperSemantics(ast.NodeVisitor):
         return self._resolve(node) if isinstance(node, ast.Attribute) else None
 
     def _is_custom_op_path(self, path: str) -> bool:
-        """Return True if ``path`` is ``torch.ops.custom_op`` or an alias."""
+        """Return True if path is torch.ops.custom_op or an alias."""
         if path == "torch.ops.custom_op" or path.startswith(
             "torch.ops.custom_op."
         ):
@@ -244,7 +245,7 @@ class WrapperSemantics(ast.NodeVisitor):
                 self._record_import_from(node)
 
     def _record_import(self, node: ast.Import) -> None:
-        """Bind ``import`` names and reject ``custom_op`` / banned roots."""
+        """Bind import names and reject custom_op / banned roots."""
         for alias in node.names:
             root = alias.name.split(".")[0]
             if root == "custom_op":
@@ -260,7 +261,7 @@ class WrapperSemantics(ast.NodeVisitor):
             )
 
     def _record_import_from(self, node: ast.ImportFrom) -> None:
-        """Bind ``from`` imports and reject unauditable star imports."""
+        """Bind from-imports and reject unauditable star imports."""
         module = node.module or ""
         if module.split(".")[0] == "custom_op":
             self._flag(
@@ -297,7 +298,7 @@ class WrapperSemantics(ast.NodeVisitor):
     def _assignment_parts(
         self, node: ast.AST
     ) -> tuple[list[ast.AST], ast.AST] | None:
-        """Return assignment targets and value, or bind a ``range`` loop."""
+        """Return assignment targets and value, or bind a range loop."""
         if isinstance(node, ast.Assign):
             return node.targets, node.value
         if isinstance(node, ast.AnnAssign) and node.value is not None:
@@ -307,7 +308,7 @@ class WrapperSemantics(ast.NodeVisitor):
         return None
 
     def _bind_range_target(self, node: ast.For | ast.comprehension) -> None:
-        """Treat ``for i in range(...)`` targets as scalar integers."""
+        """Treat for-loop range targets as scalar integers."""
         if not (
             isinstance(node.iter, ast.Call)
             and isinstance(node.iter.func, ast.Name)
@@ -374,14 +375,14 @@ class WrapperSemantics(ast.NodeVisitor):
         return False
 
     def _is_scalar_attribute(self, node: ast.Attribute) -> bool:
-        """Return True for ``x.shape`` / ``x.sizes`` or a bound scalar attr."""
+        """Return True for x.shape / x.sizes or a bound scalar attribute."""
         if node.attr in {"shape", "sizes"}:
             return True
         key = self._resolve(node)
         return key in self.scalar_refs if key else False
 
     def _is_scalar_subscript(self, node: ast.Subscript) -> bool:
-        """Return True for ``x.shape[i]``, ``x.size(...)[...]``, or a scalar."""
+        """Return True for x.shape[i], x.size(...)[...], or a scalar name."""
         base = node.value
         if isinstance(base, ast.Attribute) and base.attr in {"shape", "sizes"}:
             return True
@@ -394,7 +395,7 @@ class WrapperSemantics(ast.NodeVisitor):
         return isinstance(base, ast.Name) and base.id in self.scalar_refs
 
     def _is_scalar_call(self, node: ast.Call) -> bool:
-        """Return True for builtins, tensor metadata methods, or ``math.*``."""
+        """Return True for builtins, tensor metadata methods, or math.*."""
         func = node.func
         if isinstance(func, ast.Name):
             return func.id in _SCALAR_BUILTINS
@@ -406,7 +407,7 @@ class WrapperSemantics(ast.NodeVisitor):
         return False
 
     def _is_nn_layer_call(self, node: ast.AST) -> bool:
-        """Return True for a non-structural ``nn.Layer(...)`` constructor."""
+        """Return True for a non-structural nn.Layer(...) constructor."""
         if not isinstance(node, ast.Call):
             return False
         path = self._resolve(node.func)
@@ -440,7 +441,7 @@ class WrapperSemantics(ast.NodeVisitor):
         self.violations.append(message)
 
     def visit_Call(self, node: ast.Call) -> None:
-        """Allow ``torch.ops.custom_op``; flag other compute or side effects."""
+        """Allow torch.ops.custom_op; flag other compute or side effects."""
         func_path = self._resolve(node.func)
         if func_path and self._is_custom_op_path(func_path):
             self.calls_custom_op = True
@@ -485,7 +486,7 @@ class WrapperSemantics(ast.NodeVisitor):
         return flagged
 
     def _flag_resolved_call(self, func_path: str) -> bool:
-        """Flag vendor, functional, and disallowed ``torch.*`` calls."""
+        """Flag vendor, functional, and disallowed torch.* calls."""
         if func_path.startswith("torch_npu."):
             self._flag(f"vendor native op shortcut: {func_path}()")
             return True
@@ -526,7 +527,7 @@ class WrapperSemantics(ast.NodeVisitor):
         return False
 
     def visit_BinOp(self, node: ast.BinOp) -> None:
-        """Flag tensor arithmetic and ``@``; allow integer shape math."""
+        """Flag tensor arithmetic and @; allow integer shape math."""
         if isinstance(node.op, ast.MatMult):
             self._flag(
                 "@ (matmul) operator — compute must live in the Ascend C kernel"
@@ -542,7 +543,7 @@ class WrapperSemantics(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
-        """Flag in-place tensor arithmetic and ``@=``."""
+        """Flag in-place tensor arithmetic and @=."""
         if not isinstance(node.op, ast.MatMult):
             if not (
                 self._is_scalar(node.target) and self._is_scalar(node.value)
@@ -569,7 +570,7 @@ class WrapperSemantics(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Compare(self, node: ast.Compare) -> None:
-        """Flag tensor comparisons; allow scalar and ``is None`` checks."""
+        """Flag tensor comparisons; allow scalar and is None checks."""
         if any(isinstance(op, (ast.Is, ast.IsNot)) for op in node.ops):
             self.generic_visit(node)
             return
@@ -584,3 +585,6 @@ class WrapperSemantics(ast.NodeVisitor):
                 "compute and belong in the Ascend C kernel"
             )
         self.generic_visit(node)
+
+
+################################ AST VISITOR #################################

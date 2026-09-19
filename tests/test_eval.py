@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-import ascend_kernel_bench as akb
+import ascend_kernel_bench as bench
 from ascend_kernel_bench.eval import (
     _load_run_settings,
     _read_worker_payload,
@@ -109,11 +109,11 @@ def test_cpu_reference_inputs_casts_floats() -> None:
 
 
 def test_public_eval_exports() -> None:
-    assert "evaluate_run" in akb.__all__
-    assert "eval_sample" not in akb.__all__
-    assert "worker_main" not in akb.__all__
-    assert akb.eval.__all__ == ["evaluate_run"]
-    assert not hasattr(akb, "eval_sample")
+    assert "evaluate_run" in bench.__all__
+    assert "eval_sample" not in bench.__all__
+    assert "worker_main" not in bench.__all__
+    assert bench.eval.__all__ == ["evaluate_run"]
+    assert not hasattr(bench, "eval_sample")
 
 
 def test_worker_argv_uses_repo_script(tmp_path) -> None:

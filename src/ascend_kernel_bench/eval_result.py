@@ -30,16 +30,8 @@ def fail_result(
 ) -> dict[str, Any]:
     """Return a failed evaluation payload with empty timing fields.
 
-    Args:
-        compiled: Whether the shared library built successfully.
-        compilation_error: Build or static-check diagnostic.
-        runtime_error: Worker or candidate runtime diagnostic.
-        **extra_metadata: Extra keys merged into ``metadata``. Top-level
-            result keys such as ``correctness`` are ignored so callers
-            cannot overwrite the payload schema.
-
-    Returns:
-        KernelBench-compatible result dict with ``correctness`` False.
+    Extra metadata keys merge into metadata; top-level result keys are
+    ignored so callers cannot overwrite the payload schema.
     """
     extras = {
         key: value
@@ -70,18 +62,9 @@ def compiled_result(
     ref_runtime: float | None = None,
     ref_runtime_stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return a post-build result payload.
+    """Return a post-build result payload with compiled True.
 
-    Args:
-        correctness: Final correctness decision.
-        metadata: Stage-specific settings and diagnostics.
-        runtime: Candidate mean latency, or None.
-        runtime_stats: Candidate timing statistics, or None.
-        ref_runtime: NPU reference mean latency, or None.
-        ref_runtime_stats: NPU reference timing statistics, or None.
-
-    Returns:
-        KernelBench-compatible result dict with ``compiled`` True.
+    runtime and ref_runtime are mean latencies in milliseconds, or None.
     """
     return {
         "compiled": True,
@@ -108,19 +91,8 @@ def eval_protocol_metadata(
 ) -> dict[str, object]:
     """Return the evaluation-protocol snapshot stored on scored samples.
 
-    Args:
-        hardware_name: Profile name recorded in results.
-        precision: Floating dtype key (``fp32``, ``fp16``, or ``bf16``).
-        seed: Base RNG seed for init, correctness, and timing.
-        num_correct_trials: Number of seeded correctness trials.
-        num_warmup: Warmup calls before measured trials.
-        num_perf_trials: Retained NPU-event measurements per model.
-        l2_clear_size: Bytes allocated to flush L2 before each timed call.
-        atol: Absolute comparison tolerance used for this sample.
-        rtol: Relative comparison tolerance used for this sample.
-
-    Returns:
-        Metadata keys that identify how the sample was evaluated.
+    precision is a floating dtype key: fp32, fp16, or bf16. l2_clear_size
+    is in bytes and is allocated to flush L2 before each timed call.
     """
     return {
         "hardware": hardware_name,

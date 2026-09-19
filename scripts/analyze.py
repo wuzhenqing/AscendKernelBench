@@ -1,9 +1,5 @@
 #!/usr/bin/env python
-"""Print fast_p / pass@k tables from a saved run.
-
-Example:
-    python scripts/analyze.py relu_demo
-"""
+"""Print fast_p / pass@k tables from a saved run."""
 
 from __future__ import annotations
 

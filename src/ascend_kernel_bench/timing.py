@@ -1,13 +1,7 @@
-"""NPU Event timing with per-trial L2 clearing (docs/guide/evaluation.md).
+"""NPU event timing with per-trial L2 clearing (docs/guide/evaluation.md).
 
-Semantics follow KernelBench's ``time_execution_with_cuda_event`` ported to
-``torch.npu``: warmup with synchronize, empty_cache, then per trial
-synchronize -> event pair around the callable -> L2 thrash -> synchronize,
-discarding the first trial. torch imports stay inside functions so the host
-process can import this module without initializing an NPU runtime.
-
-The L2 flush buffer is at least 256 MiB and at least twice the profile L2
-size (SOL-ExecBench-style isolation). Warmup defaults to 10 calls.
+Warmup empties the allocator cache; each trial times one call with an event
+pair, thrashes L2 outside the event window, and drops the first trial.
 """
 
 from __future__ import annotations
@@ -26,14 +20,10 @@ REFRESH_INPUT_BYTES_LIMIT = 256 * 1024 * 1024
 
 
 def l2_clear_bytes(l2_cache_mb: int) -> int:
-    """Return a flush-buffer size at least 256 MiB and at least 2x L2.
+    """Return a flush-buffer size in bytes: at least 256 MiB and 2x L2.
 
     Args:
-        l2_cache_mb: Profile L2 capacity in mebibytes. ``0`` uses the
-            256 MiB default only.
-
-    Returns:
-        Buffer size in bytes.
+        l2_cache_mb: Profile L2 capacity in mebibytes; 0 keeps the default.
     """
     if l2_cache_mb <= 0:
         return DEFAULT_L2_CLEAR_BYTES
@@ -47,10 +37,8 @@ def clear_l2_cache(
 ) -> None:
     """Thrash device memory so the next kernel misses in L2.
 
-    Args:
-        device: ``torch.device`` or device index accepted by ``torch.empty``.
-        size_bytes: Allocation size. Rounded down to a whole number of
-            int64 elements; a non-positive size is a no-op.
+    size_bytes is rounded down to whole int64 elements; a non-positive
+    size is a no-op.
     """
     import torch
 
@@ -72,24 +60,11 @@ def time_execution_with_npu_event(
     setup: Callable[[], None] | None = None,
     l2_clear_size: int = DEFAULT_L2_CLEAR_BYTES,
 ) -> list[float]:
-    """Time ``kernel_fn(*args)`` over trials with ``torch.npu.Event`` (ms).
+    """Time kernel_fn(*args) with torch.npu.Event, in milliseconds.
 
-    ``setup`` (optional) runs before every warmup and timed call, outside the
-    event window — use it to hand the callable fresh inputs per trial so a
-    result cache cannot replay one computation across all trials.
-
-    Args:
-        kernel_fn: Callable invoked as ``kernel_fn(*args)``.
-        args: Positional arguments forwarded to ``kernel_fn``.
-        num_warmup: Synchronized warmup calls before measured trials.
-        num_trials: Number of retained measurements.
-        discard_first: Measured trials dropped before retention.
-        device: NPU device. Defaults to the current device.
-        setup: Optional per-trial setup (input refresh).
-        l2_clear_size: Bytes allocated to flush L2 before each timed call.
-
-    Returns:
-        Elapsed times in milliseconds for the retained trials.
+    num_trials counts retained measurements and the first discard_first
+    trials are dropped. setup runs before every warmup and timed call,
+    outside the event window, so a trial can use fresh inputs.
     """
     import torch
 
@@ -108,6 +83,7 @@ def time_execution_with_npu_event(
         torch.npu.empty_cache()
 
         elapsed_times: list[float] = []
+        ##################### TIMED LOOP #####################
         for trial in range(num_trials + discard_first):
             if setup is not None:
                 setup()
@@ -127,6 +103,7 @@ def time_execution_with_npu_event(
             elapsed_time_ms = start_event.elapsed_time(end_event)
             if trial >= discard_first:
                 elapsed_times.append(elapsed_time_ms)
+        ##################### TIMED LOOP #####################
     finally:
         torch.npu.set_device(previous_device)
 
@@ -136,14 +113,8 @@ def time_execution_with_npu_event(
 def get_timing_stats(elapsed_times: Sequence[float]) -> dict[str, float | int]:
     """Return mean/std/min/max/num_trials rounded to 3 significant digits.
 
-    Args:
-        elapsed_times: Per-trial latencies in milliseconds.
-
-    Returns:
-        Statistics mapping used in ``eval_result.json``.
-
     Raises:
-        ValueError: If ``elapsed_times`` is empty.
+        ValueError: If elapsed_times is empty.
     """
     if not elapsed_times:
         raise ValueError("elapsed_times must be a non-empty sequence")

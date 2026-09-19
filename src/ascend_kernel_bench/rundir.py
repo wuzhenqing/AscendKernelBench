@@ -1,9 +1,7 @@
 """Run directory layout and result persistence (docs/guide/results.md).
 
-``runs/{run_name}/`` holds generation_config.yaml, per-sample directories
-``level{L}/{task}/sample_{i}/`` (prompt.txt, custom_op.asc, model_new.py,
-build/, eval_result.json), and the aggregate eval_results.json aligned with
-KernelBench's schema.
+A run holds generation_config.yaml, one directory per sample with the two
+deliverables and eval_result.json, and an aggregate eval_results.json.
 """
 
 from __future__ import annotations
@@ -21,16 +19,7 @@ from .llm import AscendCGeneration
 
 
 def create_run(run_name: str, generation_config: dict) -> Path:
-    """Create ``runs/{run_name}/`` and stamp the generation config.
-
-    Args:
-        run_name: Directory name under :data:`RUNS_DIR`.
-        generation_config: Mapping written to ``generation_config.yaml``.
-            An empty mapping skips the file.
-
-    Returns:
-        Path of the run directory.
-    """
+    """Create the run directory and stamp the generation config."""
     run_dir = RUNS_DIR / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
     cfg_path = run_dir / "generation_config.yaml"
@@ -42,14 +31,9 @@ def create_run(run_name: str, generation_config: dict) -> Path:
 def resolve_run(run: str | Path) -> Path:
     """Resolve a run name or directory path to an existing run directory.
 
-    An existing directory is used as-is. A bare name is resolved under
-    :data:`RUNS_DIR`.
-
     Args:
-        run: Run directory name or filesystem path.
-
-    Returns:
-        Absolute path of the run directory.
+        run: Existing directory used as-is, or a bare name under the
+            runs root.
 
     Raises:
         FileNotFoundError: If the resolved path is not a directory.
@@ -66,15 +50,7 @@ def resolve_run(run: str | Path) -> Path:
 
 
 def generation_hardware_name(run_dir: Path) -> str | None:
-    """Return the hardware profile name recorded at generation time.
-
-    Args:
-        run_dir: Run directory that may contain ``generation_config.yaml``.
-
-    Returns:
-        Hardware profile name, or ``None`` when the file is missing or
-        has no usable ``hardware`` field.
-    """
+    """Return the hardware profile name recorded at generation time."""
     path = Path(run_dir) / "generation_config.yaml"
     if not path.is_file():
         return None
@@ -91,16 +67,7 @@ def generation_hardware_name(run_dir: Path) -> str | None:
 
 
 def sample_dir(run_dir: Path, task_id: str, sample_id: int) -> Path:
-    """Return ``runs/{run}/level{L}/{task}/sample_{i}/``.
-
-    Args:
-        run_dir: Run directory.
-        task_id: ``levelN/stem`` path segment.
-        sample_id: Integer sample index.
-
-    Returns:
-        Path of the sample directory (not created).
-    """
+    """Return the sample directory path for a task id and sample index."""
     return Path(run_dir) / task_id / f"sample_{sample_id}"
 
 
@@ -113,19 +80,7 @@ def save_sample(
     generation: AscendCGeneration,
     raw_response: str = "",
 ) -> Path:
-    """Persist one generated sample (prompt, both deliverables, raw text).
-
-    Args:
-        run_dir: Run directory.
-        task_id: ``levelN/stem`` path segment.
-        sample_id: Integer sample index.
-        prompt: Full user prompt written to ``prompt.txt``.
-        generation: Parsed deliverables.
-        raw_response: Optional raw model text.
-
-    Returns:
-        Path of the created sample directory.
-    """
+    """Persist one generated sample (prompt, both deliverables, raw text)."""
     out_dir = sample_dir(run_dir, task_id, sample_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
@@ -145,17 +100,9 @@ def save_sample(
 def iter_sample_dirs(
     run_dir: Path, level: int | None = None
 ) -> Iterator[tuple[str, int, Path]]:
-    """Yield ``(task_id, sample_id, dir)`` for every complete sample.
+    """Yield (task_id, sample_id, dir) for every complete sample.
 
-    A sample is complete when both ``custom_op.asc`` and ``model_new.py``
-    exist.
-
-    Args:
-        run_dir: Run directory under ``runs/``.
-        level: When set, only visit ``level{level}/`` task directories.
-
-    Yields:
-        Task id, sample index, and directory path.
+    A sample is complete when both custom_op.asc and model_new.py exist.
     """
     pattern = f"level{level}/*" if level is not None else "level*/*"
     for task_dir in sorted(Path(run_dir).glob(pattern)):
@@ -170,14 +117,7 @@ def iter_sample_dirs(
 
 
 def load_eval_result(sample_dir_path: Path) -> dict[str, Any] | None:
-    """Load ``eval_result.json`` from a sample directory, if present.
-
-    Args:
-        sample_dir_path: Per-sample directory.
-
-    Returns:
-        Parsed result dict, or ``None`` when the file is missing.
-    """
+    """Load eval_result.json from a sample directory, if present."""
     path = Path(sample_dir_path) / "eval_result.json"
     if not path.is_file():
         return None
@@ -188,15 +128,7 @@ def load_eval_result(sample_dir_path: Path) -> dict[str, Any] | None:
 
 
 def collect_eval_results(run_dir: Path) -> dict[str, list[dict[str, Any]]]:
-    """Assemble the KernelBench-compatible eval_results mapping for a run.
-
-    Args:
-        run_dir: Run directory under ``runs/``.
-
-    Returns:
-        Mapping of task id to sample result dicts that include
-        ``sample_id``. Samples without ``eval_result.json`` are omitted.
-    """
+    """Assemble the KernelBench-compatible eval_results mapping for a run."""
     results: dict[str, list[dict]] = {}
     for task_id, sample_id, sdir in iter_sample_dirs(run_dir):
         result = load_eval_result(sdir)
@@ -211,30 +143,14 @@ def collect_eval_results(run_dir: Path) -> dict[str, list[dict[str, Any]]]:
 def write_eval_results(
     run_dir: Path, results: dict[str, list[dict[str, Any]]]
 ) -> Path:
-    """Write ``eval_results.json`` atomically.
-
-    Args:
-        run_dir: Run directory under ``runs/``.
-        results: KernelBench-compatible problem-to-samples mapping.
-
-    Returns:
-        Path of the written file.
-    """
+    """Write eval_results.json atomically."""
     path = Path(run_dir) / "eval_results.json"
     write_json_atomic(path, results)
     return path
 
 
 def write_pass_at_k(run_dir: Path, pass_at_k: dict) -> Path:
-    """Write ``pass_at_k_results.json`` atomically.
-
-    Args:
-        run_dir: Run directory under ``runs/``.
-        pass_at_k: Mapping produced by :func:`score.compute_pass_at_k`.
-
-    Returns:
-        Path of the written file.
-    """
+    """Write pass_at_k_results.json atomically."""
     path = Path(run_dir) / "pass_at_k_results.json"
     write_json_atomic(path, pass_at_k)
     return path

@@ -1,22 +1,7 @@
 """Component-based prompt construction (docs/reference/configuration.md).
 
-Pure-Python assembly, in order: problem_statement (the reference Model source
-code, exactly as KernelBench presents it), hardware_block (from the hardware
-profile), examples_block (verified one-shot example pair), output_contract
-(dual code-block markers, module name ``custom_op``), instruction. Modes:
-zero_shot / one_shot (default) / few_shot.
-
-The example block teaches the Ascend C language itself — kernel class
-structure, ``__global__ __vector__``, UB budgeting and tiling, host launch,
-and the process-local ``TORCH_LIBRARY`` binding — because Ascend C is scarce
-in LLM corpora. Task semantics are NOT spelled out beyond the Model source:
-mapping a PyTorch reference to an Ascend C operator is precisely the
-capability under test.
-
-Prompts describe the implemented ACLNN operator-project path: a fixed modern
-CMake project builds ``libcustom_op.so`` and the evaluator calls
-``torch.ops.load_library`` on that file. Do not ask the model for pybind11,
-an OPP / custom_opp install project, or in-process JIT compilation.
+Sections assemble in order: problem statement, hardware block, examples block,
+output contract, instruction. Modes: zero_shot, one_shot, few_shot.
 """
 
 from __future__ import annotations
@@ -115,15 +100,7 @@ class PromptMode(str, Enum):
     FEW_SHOT = "few_shot"
 
     def chosen_examples(self, pool: list[PromptExample]) -> list[PromptExample]:
-        """Return the example slice this mode should embed.
-
-        Args:
-            pool: Bundled or caller-supplied examples.
-
-        Returns:
-            ``[]`` for zero-shot, the first example for one-shot, or
-            the full pool for few-shot.
-        """
+        """Return the example slice this mode should embed."""
         if self is PromptMode.ZERO_SHOT:
             return []
         if self is PromptMode.ONE_SHOT:
@@ -144,9 +121,6 @@ class PromptExample(BaseModel):
 
 def load_examples() -> list[PromptExample]:
     """Load verified few-shot example assets shipped with the engine.
-
-    Returns:
-        Examples sorted by directory name.
 
     Raises:
         OSError: If an example directory is missing a required file.
@@ -180,13 +154,7 @@ class PromptBuilder:
         *,
         examples: list[PromptExample] | None = None,
     ) -> None:
-        """Bind the task, hardware profile, and optional example override.
-
-        Args:
-            task: Reference KernelBench task.
-            hardware: Profile injected into the hardware-contract block.
-            examples: Optional override of bundled examples.
-        """
+        """Bind the task, hardware profile, and optional example override."""
         self.task = task
         self.hardware = hardware
         self._examples = examples
@@ -194,15 +162,8 @@ class PromptBuilder:
     def build(self, mode: str | PromptMode = PromptMode.ONE_SHOT) -> str:
         """Return the complete English user prompt (no system message).
 
-        Args:
-            mode: ``zero_shot``, ``one_shot``, or ``few_shot``.
-
-        Returns:
-            Assembled markdown prompt.
-
         Raises:
-            ValueError: If ``mode`` is unknown or examples are required
-                but missing.
+            ValueError: If mode is unknown or examples are missing.
         """
         try:
             if isinstance(mode, PromptMode):
@@ -286,17 +247,7 @@ def build_prompt(
 ) -> str:
     """Assemble the full generation prompt for one task.
 
-    Args:
-        task: Reference KernelBench task.
-        hardware: Profile injected into the hardware-contract block.
-        mode: ``zero_shot``, ``one_shot``, or ``few_shot``.
-        examples: Optional override of bundled examples.
-
-    Returns:
-        The complete English user prompt (no system message).
-
     Raises:
-        ValueError: If ``mode`` is unknown or examples are required
-            but missing.
+        ValueError: If mode is unknown or examples are missing.
     """
     return PromptBuilder(task, hardware, examples=examples).build(mode)

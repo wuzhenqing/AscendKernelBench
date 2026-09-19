@@ -24,19 +24,12 @@ class SampleStatus(Enum):
 
     @property
     def label(self) -> str:
-        """Short status token such as ``OK`` or ``COMPILE-FAIL``."""
+        """Short status token, for example OK or COMPILE-FAIL."""
         return self.value[1]
 
     @classmethod
     def from_result(cls, result: dict[str, object]) -> SampleStatus:
-        """Classify a KernelBench-compatible sample result.
-
-        Args:
-            result: Per-sample evaluation dict.
-
-        Returns:
-            The matching :class:`SampleStatus`.
-        """
+        """Classify a KernelBench-compatible sample result."""
         if result.get("correctness"):
             return cls.OK
         if not result.get("compiled"):
@@ -45,27 +38,13 @@ class SampleStatus(Enum):
 
 
 def sample_status_label(result: dict[str, object]) -> tuple[str, str]:
-    """Return Rich style and short label for one evaluation result.
-
-    Args:
-        result: Per-sample evaluation dict.
-
-    Returns:
-        ``(style, label)`` such as ``("green", "OK")``.
-    """
+    """Return the (style, label) pair for one evaluation result."""
     status = SampleStatus.from_result(result)
     return status.style, status.label
 
 
 def eval_result_lines(result: dict[str, object]) -> tuple[str, list[str]]:
-    """Return Rich style and summary lines for one evaluation result.
-
-    Args:
-        result: Per-sample evaluation dict.
-
-    Returns:
-        ``(style, lines)`` suitable for a status panel or log line.
-    """
+    """Return the Rich style and summary lines for one evaluation result."""
     style, label = sample_status_label(result)
     lines = [
         f"status: {label}",
@@ -93,14 +72,7 @@ def eval_result_lines(result: dict[str, object]) -> tuple[str, list[str]]:
 
 
 def cli_progress(console: Console) -> Progress:
-    """Return the shared Rich progress bar used by the batch CLIs.
-
-    Args:
-        console: Rich console that owns the progress output.
-
-    Returns:
-        A ``Progress`` context-manager instance.
-    """
+    """Return the shared Rich progress bar used by the batch CLIs."""
     from rich.progress import (
         BarColumn,
         MofNCompleteColumn,
@@ -123,13 +95,7 @@ def cli_progress(console: Console) -> Progress:
 def print_eval_report(
     console: Console, run_name: str, results: dict[str, object]
 ) -> None:
-    """Print the headline and per-problem evaluation tables.
-
-    Args:
-        console: Rich console that receives the tables.
-        run_name: Run directory name used in the title.
-        results: KernelBench-compatible aggregate mapping.
-    """
+    """Print the headline and per-problem evaluation tables."""
     from rich.table import Table
 
     from .score import (

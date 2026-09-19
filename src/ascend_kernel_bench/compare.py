@@ -1,9 +1,7 @@
 """Dtype-aware comparison of reference and candidate outputs.
 
-KernelBench-style matching: floating/complex tensors use ``allclose``;
-integer and Boolean tensors require exact equality. Nested tuples/lists
-are compared recursively. CPU-reference mode moves values to host memory
-before comparison so an NPU candidate can be scored against a CPU model.
+Floating and complex tensors use allclose, integer and Boolean tensors
+require exact equality. CPU-reference mode compares on host memory.
 """
 
 from __future__ import annotations
@@ -19,16 +17,7 @@ def resolve_tolerances(
     tolerances: Mapping[str, Mapping[str, float]],
     task_tolerance: Mapping[str, Any] | None,
 ) -> tuple[float, float]:
-    """Resolve ``atol`` / ``rtol`` from a task override or the eval config.
-
-    Args:
-        precision: Floating dtype key (``fp32``, ``fp16``, or ``bf16``).
-        tolerances: Per-precision mapping from the evaluation config.
-        task_tolerance: Optional nonempty task ``TOLERANCE`` dict.
-
-    Returns:
-        ``(atol, rtol)``. Missing task keys fall back to ``1e-4``.
-    """
+    """Resolve atol and rtol from a task override or the eval config."""
     if task_tolerance:
         return (
             float(task_tolerance.get("atol", 1e-4)),
@@ -39,14 +28,7 @@ def resolve_tolerances(
 
 
 def is_discrete_tensor(value: Any) -> bool:
-    """Return True if ``value`` is a non-floating, non-complex tensor.
-
-    Args:
-        value: Object that may be a ``torch.Tensor``.
-
-    Returns:
-        True when ``value`` is an integer or Boolean tensor.
-    """
+    """Return True if value is a non-floating, non-complex tensor."""
     import torch
 
     return isinstance(value, torch.Tensor) and not (
@@ -54,22 +36,9 @@ def is_discrete_tensor(value: Any) -> bool:
     )
 
 
+################################## MATCHING ##################################
 def tensor_match(ref: Any, new: Any, *, atol: float, rtol: float) -> bool:
-    """Return True if two tensors match in shape and values.
-
-    Integer/Boolean pairs use exact equality. Other tensors use
-    ``torch.allclose`` with ``atol`` / ``rtol``. A dtype that
-    ``allclose`` rejects is treated as a mismatch.
-
-    Args:
-        ref: Reference tensor.
-        new: Candidate tensor.
-        atol: Absolute tolerance for floating/complex comparison.
-        rtol: Relative tolerance for floating/complex comparison.
-
-    Returns:
-        True when shapes and values are considered equal.
-    """
+    """Return True if two tensors match in shape and values."""
     import torch
 
     if not isinstance(ref, torch.Tensor) or not isinstance(new, torch.Tensor):
@@ -84,18 +53,11 @@ def tensor_match(ref: Any, new: Any, *, atol: float, rtol: float) -> bool:
         return False
 
 
+################################## MATCHING ##################################
+
+
 def outputs_match(ref: Any, new: Any, *, atol: float, rtol: float) -> bool:
-    """Recursively compare a reference output tree to a candidate tree.
-
-    Args:
-        ref: Reference output (tensor, sequence, or scalar).
-        new: Candidate output of the same structure.
-        atol: Absolute tolerance forwarded to :func:`tensor_match`.
-        rtol: Relative tolerance forwarded to :func:`tensor_match`.
-
-    Returns:
-        True when the trees match under KernelBench comparison rules.
-    """
+    """Recursively compare a reference output tree to a candidate tree."""
     import torch
 
     if isinstance(ref, torch.Tensor):
@@ -113,14 +75,7 @@ def outputs_match(ref: Any, new: Any, *, atol: float, rtol: float) -> bool:
 
 
 def to_cpu_compare_value(value: Any) -> Any:
-    """Move a tensor to CPU; cast floating values to float32 for comparison.
-
-    Args:
-        value: Tensor or non-tensor passthrough.
-
-    Returns:
-        A CPU tensor suitable for comparison, or ``value`` unchanged.
-    """
+    """Move a tensor to CPU, casting floating values to float32."""
     import torch
 
     if not isinstance(value, torch.Tensor):
@@ -131,14 +86,7 @@ def to_cpu_compare_value(value: Any) -> Any:
 
 
 def to_cpu_compare_tree(value: Any) -> Any:
-    """Apply :func:`to_cpu_compare_value` to a tensor or a flat sequence.
-
-    Args:
-        value: Tensor or one-level sequence of values.
-
-    Returns:
-        The same structure with tensors moved to CPU.
-    """
+    """Apply to_cpu_compare_value to a tensor or a flat sequence."""
     if isinstance(value, (tuple, list)):
         return [to_cpu_compare_value(item) for item in value]
     return to_cpu_compare_value(value)
@@ -153,20 +101,7 @@ def compare_candidate_outputs(
     rtol: float,
     custom_check: CompareFn | None,
 ) -> bool:
-    """Compare candidate outputs, optionally after a CPU transfer.
-
-    Args:
-        ref: Reference output tree.
-        new: Candidate output tree.
-        ref_mode: ``"npu"`` or ``"cpu"``. CPU mode moves both trees to host
-            memory and casts floating tensors to float32.
-        atol: Absolute tolerance for the default matcher.
-        rtol: Relative tolerance for the default matcher.
-        custom_check: Optional task-provided ``custom_check(ref, out)``.
-
-    Returns:
-        True when the candidate is accepted.
-    """
+    """Compare candidate outputs under the npu or cpu reference mode."""
     if ref_mode == "cpu":
         ref = to_cpu_compare_tree(ref)
         new = to_cpu_compare_tree(new)
@@ -176,16 +111,7 @@ def compare_candidate_outputs(
 
 
 def max_abs_diff(ref: Any, new: Any) -> float:
-    """Return a finite max-abs difference for equal-shaped top-level tensors.
-
-    Args:
-        ref: Reference value.
-        new: Candidate value.
-
-    Returns:
-        The maximum absolute difference, or ``0.0`` when it cannot be
-        computed (non-tensors, shape mismatch, or a non-numeric dtype).
-    """
+    """Return a finite max-abs difference for equal-shaped top-level tensors."""
     import torch
 
     if not (
@@ -210,14 +136,7 @@ def max_abs_diff(ref: Any, new: Any) -> float:
 
 
 def snapshot_inputs(inputs: Sequence[Any]) -> list[Any]:
-    """Clone top-level tensors so later mutations can be detected.
-
-    Args:
-        inputs: Candidate forward arguments after device transfer.
-
-    Returns:
-        A list of cloned tensors and unchanged non-tensors.
-    """
+    """Clone top-level tensors so later mutations can be detected."""
     import torch
 
     return [
@@ -227,15 +146,7 @@ def snapshot_inputs(inputs: Sequence[Any]) -> list[Any]:
 
 
 def inputs_were_mutated(inputs: Sequence[Any], snapshot: Sequence[Any]) -> bool:
-    """Return True if any top-level tensor differs from its snapshot.
-
-    Args:
-        inputs: Arguments after the candidate forward.
-        snapshot: Clones taken before that forward.
-
-    Returns:
-        True when any paired tensors are not exactly equal.
-    """
+    """Return True if any top-level tensor differs from its snapshot."""
     import torch
 
     return any(
@@ -247,18 +158,7 @@ def inputs_were_mutated(inputs: Sequence[Any], snapshot: Sequence[Any]) -> bool:
 
 
 def move_value_to_device(value: Any, device: Any, dtype: Any) -> Any:
-    """Move a tensor to ``device``, casting only floating dtypes.
-
-    Integer and Boolean tensors keep their dtype. Non-tensors pass through.
-
-    Args:
-        value: Tensor or passthrough object.
-        device: ``torch.device`` accepted by ``Tensor.to``.
-        dtype: Floating dtype applied to floating tensors.
-
-    Returns:
-        A device-resident tensor, or ``value`` unchanged.
-    """
+    """Move a tensor to device, casting only floating dtypes."""
     import torch
 
     if not isinstance(value, torch.Tensor):
@@ -269,14 +169,7 @@ def move_value_to_device(value: Any, device: Any, dtype: Any) -> Any:
 
 
 def tensor_nbytes(value: Any) -> int:
-    """Return the number of bytes in tensors in ``value`` (one nesting level).
-
-    Args:
-        value: A tensor, a sequence of tensors, or an unrelated object.
-
-    Returns:
-        Sum of ``numel * element_size`` over tensors; ``0`` otherwise.
-    """
+    """Return the number of bytes in tensors in value (one nesting level)."""
     import torch
 
     if isinstance(value, torch.Tensor):

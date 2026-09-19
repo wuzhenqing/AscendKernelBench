@@ -1,14 +1,8 @@
 #!/usr/bin/env python
-"""Evaluate generated samples in a run.
+"""Evaluate generated samples in a run directory.
 
-Each sample is evaluated in an isolated worker subprocess (build -> 5 seeded
-correctness trials -> NPU-Event timing vs the torch_npu eager reference).
-Writes per-sample eval_result.json, then aggregates eval_results.json and
-pass_at_k_results.json.
-
-Examples:
-    python scripts/evaluate.py relu_demo
-    python scripts/evaluate.py relu_demo 1
+Each sample runs in an isolated worker subprocess (build, correctness trials,
+NPU-event timing) and lands in eval_results.json.
 """
 
 from __future__ import annotations

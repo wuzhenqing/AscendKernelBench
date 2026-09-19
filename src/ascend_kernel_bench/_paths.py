@@ -1,10 +1,7 @@
 """Repository layout constants.
 
-Data directories (``configs/``, ``KernelBench/``, ``build_template/``,
-``runs/``) are anchored to the repository root, so running from a checkout
-needs no configuration. When the package is pip-installed, point the
-``AKB_REPO_ROOT`` environment variable at a checkout containing those
-directories.
+Data directories are anchored to the repository root. A pip install needs
+ASCEND_KERNEL_BENCH_REPO_ROOT pointing at a checkout.
 """
 
 from __future__ import annotations
@@ -13,7 +10,7 @@ import os
 from pathlib import Path
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-_repo_root_override = os.environ.get("AKB_REPO_ROOT")
+_repo_root_override = os.environ.get("ASCEND_KERNEL_BENCH_REPO_ROOT")
 REPO_ROOT = (
     Path(_repo_root_override).expanduser().resolve()
     if _repo_root_override

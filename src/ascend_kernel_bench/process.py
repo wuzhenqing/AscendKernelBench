@@ -1,8 +1,7 @@
 """Isolated JSON-in / JSON-out child processes.
 
-Generation-adjacent tools (evaluation and baseline measurement) share the
-same pattern: write a config object, spawn a worker, read a JSON result.
-A small factory selects the argv and result-file key for each job kind.
+Generation-adjacent tools (evaluation and baseline measurement) share one
+pattern: write a config object, spawn a worker, read a JSON result.
 """
 
 from __future__ import annotations
@@ -36,10 +35,9 @@ class IsolatedJobResult:
 
 
 class IsolatedJsonWorker:
-    """Run a child that reads ``cfg.json`` and writes one JSON object.
+    """Run a child that reads cfg.json and writes one JSON object.
 
-    Use :meth:`for_eval` or :meth:`for_baseline` rather than constructing
-    the argv by hand.
+    Use for_eval or for_baseline rather than constructing argv by hand.
     """
 
     def __init__(
@@ -50,16 +48,12 @@ class IsolatedJsonWorker:
         prefix: str,
         raise_on_timeout: bool = False,
     ) -> None:
-        """Record timeout and the cfg key that names the result file.
+        """Record the timeout and the cfg key that names the result file.
 
-        Args:
-            timeout_s: ``communicate`` / ``run`` budget in seconds.
-            result_key: Injected into the cfg mapping (``result_path`` or
-                ``out_path``).
-            prefix: Temporary-directory prefix.
-            raise_on_timeout: Re-raise ``TimeoutExpired`` after killing
-                the process group (baseline). Evaluation maps timeout to
-                a failed payload instead.
+        result_key is injected into cfg and is result_path or out_path. With
+        raise_on_timeout set, a timeout re-raises TimeoutExpired after the
+        process group is killed (baseline); evaluation reports a failed
+        payload instead.
         """
         self.timeout_s = timeout_s
         self.result_key = result_key
@@ -72,7 +66,7 @@ class IsolatedJsonWorker:
         return cls(
             timeout_s=timeout_s,
             result_key="result_path",
-            prefix="akb_eval_",
+            prefix="ascend_kernel_bench_eval_",
         )
 
     @classmethod
@@ -81,18 +75,15 @@ class IsolatedJsonWorker:
         return cls(
             timeout_s=timeout_s,
             result_key="out_path",
-            prefix="akb_baseline_",
+            prefix="ascend_kernel_bench_baseline_",
             raise_on_timeout=True,
         )
 
     def argv_for(self, cfg_path: Path) -> list[str]:
-        """Return the child argv for ``cfg_path``.
-
-        Args:
-            cfg_path: Temporary worker configuration file.
+        """Return the child argv for cfg_path.
 
         Returns:
-            ``[python, worker, cfg.json]``.
+            [python, worker, cfg.json].
 
         Raises:
             FileNotFoundError: If the eval worker script is missing.
@@ -112,18 +103,18 @@ class IsolatedJsonWorker:
         ]
 
     def run(self, cfg: dict[str, Any]) -> IsolatedJobResult:
-        """Write ``cfg``, spawn the worker, and parse its JSON result.
+        """Write cfg, spawn the worker, and parse its JSON result.
 
         Args:
-            cfg: Worker configuration. ``result_key`` is overwritten with
+            cfg: Worker configuration; the result key is overwritten with
                 a path inside the temporary directory.
 
         Returns:
             Process status plus a parsed object when the child succeeded.
 
         Raises:
-            subprocess.TimeoutExpired: When ``raise_on_timeout`` is set
-                and the child exceeds ``timeout_s``.
+            subprocess.TimeoutExpired: When raise_on_timeout is set and the
+                child exceeds timeout_s.
         """
         with tempfile.TemporaryDirectory(prefix=self.prefix) as tmpdir:
             result_path = Path(tmpdir) / "result.json"
@@ -143,7 +134,8 @@ class IsolatedJsonWorker:
         env: dict[str, str],
         result_path: Path,
     ) -> IsolatedJobResult:
-        """Spawn ``argv`` and collect stderr plus an optional JSON payload."""
+        """Spawn argv and collect stderr plus an optional JSON payload."""
+        #################### WORKER SPAWN ####################
         proc = subprocess.Popen(
             argv,
             stdout=subprocess.DEVNULL,
@@ -167,6 +159,7 @@ class IsolatedJsonWorker:
                 payload=None,
                 timed_out=True,
             )
+        #################### WORKER SPAWN ####################
         payload, parse_error = _load_payload(result_path)
         return IsolatedJobResult(
             returncode=proc.returncode or 0,
@@ -180,7 +173,7 @@ class IsolatedJsonWorker:
 def _load_payload(
     result_path: Path,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """Return ``(object, None)`` or ``(None, diagnostic)``."""
+    """Return (object, None) or (None, diagnostic)."""
     if not result_path.is_file():
         return None, "worker produced no result.json"
     try:

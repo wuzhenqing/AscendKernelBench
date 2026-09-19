@@ -1,12 +1,10 @@
-"""Regex catalogs and the public ``model_new.py`` static-check entry."""
+"""Regex catalogs and the public model_new.py static-check entry."""
 
 from __future__ import annotations
 
 from .python_ast import WrapperSemantics
 from .rules import PatternRule, run_rules
 from .text import dedupe, prepare_python_source
-
-# --- Bypass checks (strictly prohibited) ---
 
 TRY_EXCEPT_PATTERNS = (r"\btry\s*:", r"\bexcept\s*:", r"\bexcept\s+\w+")
 PASS_PATTERN = r"\bpass\b"
@@ -69,6 +67,7 @@ RESULT_CACHE_PATTERNS = (
     r"functools\.(lru_cache|cache)",
 )
 
+############################# REGEX RULE CATALOG #############################
 PYTHON_PATTERN_RULES: tuple[PatternRule, ...] = (
     PatternRule(
         TRY_EXCEPT_PATTERNS,
@@ -105,13 +104,14 @@ PYTHON_PATTERN_RULES: tuple[PatternRule, ...] = (
         "Caches results across calls (outputs must depend on current inputs)",
     ),
 )
+############################# REGEX RULE CATALOG #############################
 
 
 def check_model_new(source: str) -> list[str]:
-    """Return static-check violations for generated ``model_new.py`` source.
+    """Return static-check violations for generated model_new.py source.
 
     Args:
-        source: Raw ``model_new.py`` text.
+        source: Raw model_new.py text.
 
     Returns:
         Deduplicated human-readable violations; empty means pass.
