@@ -31,11 +31,11 @@ Read the metadata rather than relying on the CLI's `COMPILE-FAIL` / `WRONG` labe
 
 User scripts and the isolated eval worker both bootstrap the checkout `src/` directory (`scripts/_bootstrap.py`, used by `scripts/evaluate.py` and `scripts/_eval_worker.py`). Run commands from a complete checkout so `scripts/_eval_worker.py` exists. An editable `pip install` is optional for that import path.
 
-If the worker still cannot import the package, confirm `AKB_REPO_ROOT` (when set) points at that checkout, and that you are using the same Python interpreter that has the third-party dependencies installed.
+If the worker still cannot import the package, confirm `ASCEND_KERNEL_BENCH_REPO_ROOT` (when set) points at that checkout, and that you are using the same Python interpreter that has the third-party dependencies installed.
 
 ### Missing `torch` or `torch_npu`
 
-The base package dependencies support generation and analysis. They do not install the Ascend runtime stack. On a Linux host with CANN 9.1.0, recreate the experiment environment with `conda env create -f environment.yml`, then `conda activate akb` and source `set_env.sh` (see [getting started](getting-started.md)). Use that same interpreter for evaluation; the CMake build receives it as `Python3_EXECUTABLE` and discovers PyTorch / `torch_npu` through it.
+`requirements.txt` installs PyTorch and `torch_npu` on Linux, but never the Ascend runtime stack itself. On a Linux host with CANN 9.1.0, recreate the experiment environment with `conda create -n AscendKernelBench python=3.12 -y`, then `conda activate AscendKernelBench`, `pip install -r requirements.txt`, and source `set_env.sh` (see [getting started](getting-started.md)). Use that same interpreter for evaluation; the CMake build receives it as `Python3_EXECUTABLE` and discovers PyTorch / `torch_npu` through it.
 
 Do not try to resolve a missing `torch_npu` import on macOS by substituting a CPU evaluation path. Move the saved sources to the prepared Ascend host instead. Some tasks also import optional libraries; inspect the task's imports when a reference module cannot load.
 
@@ -46,7 +46,7 @@ Task IDs use the form `level1/19_ReLU`, relative to `KernelBench/`. Check the ex
 Paths default to the repository root inferred from the installed package. If you installed a wheel or need to use a different checkout, set the root before launching Python:
 
 ```bash
-export AKB_REPO_ROOT='/absolute/path/to/AscendKernelBench'
+export ASCEND_KERNEL_BENCH_REPO_ROOT='/absolute/path/to/AscendKernelBench'
 ```
 
 This also chooses the `runs/` and `results/` directories. Changing the current directory alone does not redirect them. Paths are resolved when the module is imported, so restart the Python process after changing this variable.
@@ -61,7 +61,7 @@ See [Connect an LLM service](../deploy_llm_service.md) for the endpoint contract
 | Connection, DNS, or TLS error | The generation host can reach the API base URL, including any required network or proxy configuration. |
 | HTTP 404 or unknown model | The base URL is an API root rather than a full completion URL, and `--model` matches a served identifier. |
 | Unsupported parameter or response format | The endpoint accepts Chat Completions with `temperature` and `max_tokens`. Structured-output failure triggers a plain-request fallback. |
-| `no fenced code blocks found` | The plain fallback response must contain fenced source blocks; plain JSON is not parsed by that fallback. |
+| `no JSON fields and no fenced code blocks` | The response must carry either a JSON object with the two deliverable fields or two fenced source blocks. A truncated or prose-only answer has neither. |
 | Missing `__vector__`, `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL`, `class ModelNew`, or `torch.ops.custom_op` | The model returned incomplete or incorrectly formatted file contents. Inspect the response where available and the console error. |
 | Truncated source | Review the service's output limit and `generation.max_tokens` in the selected YAML configuration. |
 
@@ -108,6 +108,34 @@ The ACLNN CMake project requires CMake, the ASC toolchain, a suitable GCC toolch
 Read the matching build log and confirm that the selected hardware profile matches the device and compiler. The profile supplies `CMAKE_ASC_ARCHITECTURES`. The generated file must use the APIs expected by the project's build template and export `TORCH_LIBRARY(custom_op, ...)` plus `TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, ...)`.
 
 `Built shared library not found` means the build command returned successfully but `libcustom_op.so` was not found in the sample directory. Check the output location and preserve the build log for investigation.
+
+### Each sample takes about two minutes to build
+
+Expected, not a fault. Measured on an Ascend 910B2 with CANN 9.1.0 for a
+120-line elementwise kernel: 9 s of worker startup, 11 s of CMake configure, and
+121 s of ASC compilation. Re-evaluating an unchanged sample reuses its build
+directory and takes under a second.
+
+The compile is dominated by `torch/extension.h`, which expands to roughly 5000
+header files, and the ASC front-end parses that set for every sample. The same
+kernel without torch headers compiles in 8 s. This is the normal cost of a
+PyTorch C++ extension rather than an Ascend-specific problem: cold
+`torch/extension.h` builds are reported at 60-120 s on CUDA as well, while
+plain nvcc kernels that avoid torch headers are the 10-20 s case.
+
+Options and their price:
+
+- Narrowing the includes in the bundled examples to `ATen/ATen.h` plus
+  `torch/library.h` measures 66 s instead of 121 s, but changes what the
+  few-shot examples demonstrate.
+- Precompiled headers would remove most of the parse cost; the CANN 9.1
+  `bisheng` driver does not emit one for the `--asc-aicore-lang` mode that
+  Ascend C compilation needs.
+- `ASCEND_KERNEL_BENCH_ENABLE_CCACHE=1` speeds up re-evaluation of unchanged
+  samples only, because new sources cannot hit an existing cache entry.
+
+Builds run inside each sample's own worker process, so samples cannot share a
+compilation or configure step.
 
 ### `module load failed` or `candidate model init failed`
 

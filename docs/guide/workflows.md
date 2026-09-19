@@ -10,7 +10,7 @@ After [configuring your environment](getting-started.md), generate candidates fo
 python scripts/generate.py \
   --task level1/19_ReLU \
   --task level1/20_LeakyReLU \
-  --model "$AKB_MODEL" \
+  --model your-served-model-name \
   --hardware ascend910b2 \
   --n-samples 10 \
   --temperature 0.7 \
@@ -18,6 +18,23 @@ python scripts/generate.py \
 ```
 
 Repeat `--task` to select multiple tasks. Alternatively, use `--level 1` for all level 1 tasks. Omitting both selectors generates candidates for **all discovered tasks**, so start with explicit task IDs when checking an endpoint.
+
+### The fixed level 1 subset
+
+`configs/subsets/level1_20.txt` records a fixed subset of 20 level 1 tasks:
+every fifth task of the level in numeric order, so the sample is systematic
+rather than hand-picked. Pass it with `--tasks-file` to compare models,
+prompts, and harness revisions on identical tasks:
+
+```bash
+python scripts/generate.py \
+  --tasks-file configs/subsets/level1_20.txt \
+  --model your-served-model-name \
+  --hardware ascend910b2 \
+  --run-name level1-20
+```
+
+Keep the manifest stable. Changing it breaks comparability with earlier runs.
 
 The command processes tasks and samples sequentially. Sample IDs start at zero for each task. There is no CLI option for parallel generation or automatic resume.
 

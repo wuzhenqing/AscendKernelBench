@@ -38,27 +38,34 @@ automatic compile-error repair agent and no scheduler / multi-device queue.
 ## Commands
 
 ```bash
-# Setup (any machine; NPU not required)
-python -m pip install -e ".[dev]"
+# Setup (any machine; NPU not required). requirements.txt is the only
+# dependency file; it installs the pinned torch pair on Linux.
+python -m pip install -r requirements.txt
 pre-commit install
 
-# Quality gate — both must pass before you call a change done
-pytest -q                              # 95 passed, 2 skipped on a torch-less host
+# Quality gate, both must pass before you call a change done
+pytest -q                              # 107 passed, 2 skipped on a torch-less host
+pytest -q tests/test_score.py          # one file
+pytest -q tests/test_score.py::test_summarize_includes_mean_sol   # one test
 pre-commit run --all-files             # ruff lint + format, whitespace, codespell
 
 # Offline fallback when pre-commit cannot fetch hooks / write its cache
 ruff check . && ruff format --check .
 
 # Ascend host experiment environment (CANN 9.1.0 pairing)
-conda env create -f environment.yml && conda activate akb
+conda create -n AscendKernelBench python=3.12 -y && conda activate AscendKernelBench
 source /usr/local/Ascend/cann-9.1.0/set_env.sh
-python -m pip install -e ".[dev]"
+python -m pip install -r requirements.txt
 
 # Workflow CLIs (run from the checkout root)
 export OPENAI_BASE_URL="https://provider.example/v1" OPENAI_API_KEY="..."
 python scripts/generate.py --task level1/19_ReLU --model <model> \
     --hardware ascend910b2 --run-name relu_demo [--level N] [--n-samples N] \
-    [--prompt-mode zero_shot|one_shot|few_shot] [--temperature T] [--config PATH]
+    [--prompt-mode zero_shot|one_shot|few_shot] [--temperature T] [--config PATH] \
+    [--max-tokens N] [--reasoning-effort low|medium|high]
+# Fixed comparison set: 20 level1 tasks, every fifth task of the level.
+python scripts/generate.py --tasks-file configs/subsets/level1_20.txt \
+    --model <model> --reasoning-effort high --run-name level1_20
 # NPU commands need device access: without it aclInit fails with 507899 (see
 # Local host notes). Have the user run them, or escalate the sandbox.
 ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py relu_demo [level]
@@ -73,7 +80,13 @@ CLI facts worth remembering:
   `configs/eval_default.yaml` and resolves hardware from the run's
   `generation_config.yaml` (falling back to `config.hardware`).
 * `scripts/generate.py` and `scripts/baseline.py` accept `--config` /
-  `--hardware`.
+  `--hardware`. Generation also selects tasks with `--tasks-file` and
+  forwards `--max-tokens` / `--reasoning-effort` to the endpoint; both are
+  recorded in the run's `generation_config.yaml`.
+* Response parsing accepts a JSON object holding `custom_op_asc` and
+  `model_new_py`, or two fenced code blocks. Endpoints that reject
+  `response_format` (DeepSeek-compatible ones) answer the structured request
+  with that JSON, so the JSON path is the one that runs there.
 * `scripts/_eval_worker.py` is internal. Never call it by hand; it is spawned
   by `eval.eval_sample`.
 * Offline analysis (`analyze.py`, `score.py`) needs neither torch nor an NPU.
@@ -89,6 +102,8 @@ CLI facts worth remembering:
 | `scripts/` | The four user CLIs plus `_bootstrap.py` / `_eval_worker.py`. |
 | `configs/eval_default.yaml` | Default protocol: 5 correctness trials, 10 warmup + 100 perf trials, tolerances, timeouts, generation defaults. |
 | `configs/hardware/*.yaml` | Hardware profiles validated by `config.HardwareProfile`. Default `ascend910b2`; `ascend950pr` is reserved and unvalidated. |
+| `configs/subsets/*.txt` | Fixed task subsets for comparable runs. `level1_20.txt` is every fifth level1 task, loaded with `--tasks-file`. Keep the lists stable. |
+| `requirements.txt` | The only dependency file. Backbone packages unpinned; the torch pair pinned to the CANN pairing. |
 | `build_template/CMakeLists.txt` | The single build path that produces `libcustom_op.so`. |
 | `tests/` | NPU-free unit tests (CPU torch optional). |
 | `docs/` | English guides (`guide/`) and references (`reference/`). |
@@ -98,7 +113,7 @@ Module boundaries are strict; `docs/reference/architecture.md` has the full
 API-layer table. In short: host code goes through `eval.evaluate_run`;
 `eval_device` and `worker_main` are worker-side only; `score.py` never loads
 kernels or tasks; `_paths.py` anchors all data directories to the repo root
-(override with `AKB_REPO_ROOT` for an installed package).
+(override with `ASCEND_KERNEL_BENCH_REPO_ROOT` for an installed package).
 
 ## Invariants — do not break these
 
@@ -150,6 +165,31 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
   errors go through `log.die()`.
 * Public API is re-exported from `__init__.py` and `__all__`; keep that list
   accurate when adding a public function.
+* CI is the single quality workflow: pre-commit plus pytest on Python 3.10
+  and 3.12. No workflow may require an Ascend device, because GitHub runners
+  never have one; kernel build and timing stay host-side validation.
+
+## Naming and comment style
+
+* Call the project AscendKernelBench in code, prompts, docs, and commit
+  messages. Do not abbreviate it as akb; the conda environment carries the
+  full name too.
+* Comments and docstrings stay short: at most 3 consecutive lines per
+  comment, 80 columns maximum, plain prose. No backticks, no markdown
+  emphasis, no bullet markers, no decorative quotes. Write identifiers bare,
+  as in torch.ops.load_library.
+* Public docstrings keep a one-line summary, plus Args/Returns/Raises only
+  where a unit, a format, or an exception is not obvious from the signature.
+  Module docstrings are at most 3 lines. Private helpers get one line.
+* Mark a genuinely important block, such as a protocol step, the build path,
+  a scoring formula, or a key config group, with the same banner line above
+  and below it: a run of # characters, an uppercase keyword, another run of
+  # characters, 80 columns maximum.
+* Delete comments that restate the next line or narrate history. A comment
+  that has drifted out of date is worse than no comment.
+* `tests/test_comment_style.py` enforces the line, block, decoration, banner,
+  and docstring limits over the whole tree except the vendored corpus. Run it
+  before claiming a comment cleanup is done.
 
 ## Tests
 
@@ -173,16 +213,19 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
 | New CLI flag | Thin `scripts/*.py` argparse + `cli_util.py` factory + `docs/reference/cli.md`. |
 | Build backend | `build.py` (`build_custom_op` / `load_custom_op` are the only surface) + `build_template/CMakeLists.txt`. |
 | New task | Add to `KernelBench/levelN/` keeping `Model`, `get_inputs`, `get_init_inputs`; see `docs/task_authoring.md`. Task source is validated statically and never executed at load time. |
+| New comparison subset | `configs/subsets/<name>.txt` + `tests/test_subsets.py` + `docs/guide/workflows.md`. Fix the sampling rule in the manifest header and keep the list stable. |
 
 ## Local host notes (this checkout, not upstream truths)
 
 * Two Python environments exist here: the default base conda env (3.14, has
   `pytest`/`ruff`/`pre-commit` and an editable install, **no torch**) for tests
-  and lint, and the `akb` conda env (`/root/miniconda3/envs/akb`, Python 3.12,
-  torch 2.10.0 + torch-npu 2.10.0.post6, CANN 9.1.0) for anything NPU-related.
+  and lint, and the AscendKernelBench conda env
+  (`/root/miniconda3/envs/AscendKernelBench`, Python 3.12, torch 2.10.0 +
+  torch-npu 2.10.0.post6, CANN 9.1.0) for anything NPU-related. A legacy env
+  named `akb` holds the same packages and is no longer the documented name.
 * **The NPU works here — but only outside the agent's file sandbox.** The host
-  is an Ascend 910B2 (`npu-smi` 25.2.1, Health OK, 64 GB HBM) and the `akb`
-  env reaches it: `torch.npu.is_available()` is `True`, `device_count()` is 1,
+  is an Ascend 910B2 (`npu-smi` 25.2.1, Health OK, 64 GB HBM) and the
+  AscendKernelBench env reaches it: `torch.npu.is_available()` is `True`, `device_count()` is 1,
   and a matmul on `npu:0` succeeds. Under the default `workspace-write`
   sandbox, opening `/dev/davinci*` (mode 0666) fails with `EACCES`, which
   surfaces as `aclInit ... error code is 507899` from torch_npu and
@@ -200,14 +243,24 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
   variables (`ASCEND_TOOLKIT_HOME`, `ASCEND_OPP_PATH`, driver `lib64` in
   `LD_LIBRARY_PATH`, `bisheng` on `PATH`) are already present in
   non-interactive shells, so no `.bashrc` sourcing is required.
-* `pre-commit run --all-files` cannot run in this container as-is: hook
-  environments are fetched from github.com, which times out here, and the
-  default `~/.cache/pre-commit` is outside the sandbox. Use
-  `ruff check . && ruff format --check .` as the offline gate and say that
-  pre-commit itself was not run.
+* `pre-commit run --all-files` works here once the hook environments are
+  cached under `~/.cache/pre-commit`; the first run has to fetch them from
+  github.com, which can time out. When that fetch fails, fall back to
+  `ruff check . && ruff format --check .` and say pre-commit was not run.
 * Re-evaluation of an unchanged sample reuses the sample-local `build/`
-  directory, so builds are incremental. Set `AKB_ENABLE_CCACHE=1` to opt into
-  ccache; set `CANN_SET_ENV` to point at a different `set_env.sh`.
+  directory, so builds are incremental. Set
+  `ASCEND_KERNEL_BENCH_ENABLE_CCACHE=1` to opt into ccache; set `CANN_SET_ENV`
+  to point at a different `set_env.sh`.
+* Cold evaluation costs about 140 s per sample, of which 121 s is the ASC
+  front-end parsing `torch/extension.h` in the sample translation unit. The
+  breakdown and the options are in
+  `docs/guide/troubleshooting.md`; the measured numbers are for this host, so
+  re-measure before quoting them elsewhere.
+* The DeepSeek endpoint used for the reference run is
+  `https://api.deepseek.com/v1` with `OPENAI_API_KEY` set from the
+  session's `ANTHROPIC_AUTH_TOKEN`; `deepseek-flash` accepts
+  `reasoning_effort` and rejects `response_format`, so generation always
+  takes the JSON or fenced-block fallback path.
 
 ## Definition of done
 

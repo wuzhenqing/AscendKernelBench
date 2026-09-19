@@ -1,6 +1,6 @@
 # CLI reference
 
-Run these scripts from the checkout root. Each script bootstraps the repository `src/` directory, so an editable `pip install` of this package is not required to import it. Third-party dependencies still need to be installed; see [getting started](../guide/getting-started.md). Each command supports `-h` / `--help`. There is no installed `akb` or `ascend-kernel-bench` command-line entry point.
+Run these scripts from the checkout root. Each script bootstraps the repository `src/` directory, so an editable `pip install` of this package is not required to import it. Third-party dependencies still need to be installed; see [getting started](../guide/getting-started.md). Each command supports `-h` / `--help`. The scripts are the only command-line interface; installing the package does not add an executable entry point.
 
 `scripts/_eval_worker.py` is an internal process entry used by `evaluate_run`. Do not invoke it directly.
 
@@ -10,6 +10,7 @@ Run these scripts from the checkout root. Each script bootstraps the repository 
 | --- | --- |
 | Task ID | `level{number}/{file_stem}`, for example `level1/19_ReLU`. Omit `KernelBench/` and `.py`. |
 | `--task` and `--level` | In batch generation and baseline measurement, repeat `--task` to select tasks. It overrides `--level`. Omitting both selects all discovered tasks. |
+| `--tasks-file` | Generation only. A manifest of task IDs, one per line, with blank lines and `#` comments ignored; see `configs/subsets/`. `--task` overrides it. |
 | Run name | A directory name under `<repository>/runs/`. Use a simple, unique name such as `relu-demo`. There is no separate `--run-dir` option. |
 | `--hardware` | A profile name such as `ascend910b2`, or the path to an existing YAML file. |
 | `--config` | An evaluation YAML file. If omitted, loads `<repository>/configs/eval_default.yaml`. A relative path is resolved from the current working directory. |
@@ -25,7 +26,7 @@ Generate source files through the configured LLM endpoint. This command does not
 python scripts/generate.py \
   --task level1/19_ReLU \
   --n-samples 10 \
-  --model "$AKB_MODEL" \
+  --model your-served-model-name \
   --run-name relu-10
 ```
 
@@ -33,15 +34,18 @@ python scripts/generate.py \
 | --- | --- | --- |
 | `--level INTEGER` | All levels | Discover tasks from one level. |
 | `--task TASK_ID` | Unset | Select a task; repeat for multiple tasks. Overrides `--level`. |
+| `--tasks-file PATH` | Unset | Select tasks from a manifest file; overrides `--level`. |
 | `--n-samples INTEGER` | `generation.num_samples`, otherwise `1` | Number of samples per task. Use a positive integer. |
-| `--model NAME` | `generation.model`, otherwise `deepseek-v4-flash` | Endpoint model name. |
+| `--model NAME` | `generation.model`, otherwise `deepseek-flash` | Endpoint model name. |
 | `--hardware NAME_OR_PATH` | `hardware` from configuration | Select the hardware description injected into the prompt. |
 | `--prompt-mode MODE` | `generation.prompt_mode`, otherwise `one_shot` | `zero_shot`, `one_shot`, or `few_shot`. |
 | `--temperature FLOAT` | `generation.temperature`, otherwise `0.0` | Generation sampling temperature. |
+| `--max-tokens INTEGER` | `generation.max_tokens`, otherwise `131072` | Completion token budget, reasoning tokens included. |
+| `--reasoning-effort LEVEL` | `generation.reasoning_effort`, otherwise unset | `low`, `medium`, or `high`. The parameter is omitted from the request when unset. |
 | `--run-name NAME` | `gen_YYYYMMDD_HHMMSS` | Output run name, using local time when generated automatically. |
 | `--config PATH` | `configs/eval_default.yaml` | Load generation and hardware settings from an evaluation YAML file. |
 
-`max_tokens` is configured through `generation.max_tokens`; there is no `--max-tokens` flag. Successful samples include `prompt.txt`, `custom_op.asc`, `model_new.py`, and, when nonempty, `response_raw.txt`.
+Successful samples include `prompt.txt`, `custom_op.asc`, `model_new.py`, and, when nonempty, `response_raw.txt`.
 
 Generation errors are printed and the batch continues. The script exits with status 1 if **all** generation attempts fail; a partially successful batch returns status 0. Check the final saved/expected count before proceeding. Configuration, task loading, and prompt-construction errors can also stop execution.
 

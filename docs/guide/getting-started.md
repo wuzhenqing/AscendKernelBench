@@ -24,17 +24,16 @@ git clone https://github.com/wuzhenqing/AscendKernelBench.git
 cd AscendKernelBench
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -r requirements.txt
 ```
 
 Run the commands in these guides from the repository root, with the environment activated. Scripts and the isolated eval worker bootstrap the checkout `src/` directory, so an editable install is optional when you already have the third-party dependencies. Tasks, hardware profiles, scripts, and the build template are used directly from the checkout; no dataset submodule initialization is needed.
 
-The base installation provides the Python dependencies for generation and reporting. It does not install PyTorch, `torch_npu`, CANN, the NPU driver, or the native build toolchain.
+`requirements.txt` is the only dependency file. On Linux it also installs the pinned PyTorch and `torch_npu` pair. It never installs CANN, the NPU driver, or the native build toolchain.
 
-For linting and unit tests, install the development extra and the pre-commit hooks:
+For linting and unit tests, install the pre-commit hooks:
 
 ```bash
-python -m pip install -e ".[dev]"
 pre-commit install
 pre-commit run --all-files
 pytest
@@ -42,14 +41,14 @@ pytest
 
 ### Ascend host experiment environment
 
-On a Linux machine with CANN 9.1.0, use conda env `akb` (Python 3.12,
-PyTorch 2.10.0, torch-npu 2.10.0.post6):
+On a Linux machine with CANN 9.1.0, use the conda env AscendKernelBench,
+which pairs Python 3.12 with PyTorch 2.10.0 and torch-npu 2.10.0.post6:
 
 ```bash
-conda env create -f environment.yml
-conda activate akb
+conda create -n AscendKernelBench python=3.12 -y
+conda activate AscendKernelBench
 source /usr/local/Ascend/cann-9.1.0/set_env.sh
-python -m pip install -e ".[dev]"
+python -m pip install -r requirements.txt
 ```
 
 Confirm the NPU is visible before evaluating:
@@ -107,12 +106,11 @@ Configure an endpoint and a model name that your service actually exposes. The m
 ```bash
 export OPENAI_BASE_URL='https://your-endpoint.example/v1'
 export OPENAI_API_KEY='your-api-key'
-export AKB_MODEL='your-served-model-name'
 
 python scripts/generate.py \
   --task level1/19_ReLU \
   --hardware ascend910b2 \
-  --model "$AKB_MODEL" \
+  --model your-served-model-name \
   --n-samples 1 \
   --run-name relu-demo
 ```

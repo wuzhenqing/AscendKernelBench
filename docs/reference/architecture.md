@@ -80,10 +80,10 @@ Evaluation is sequential at the batch-script level, with a new worker for each s
 
 ## Repository data and installed package
 
-`_paths.py` anchors configurations, tasks, build templates, runs, and baseline results to a repository root. By default, the root is inferred from the source package layout. Set `AKB_REPO_ROOT` to a checkout path when using an installed package whose location is separate from those data directories.
+`_paths.py` anchors configurations, tasks, build templates, runs, and baseline results to a repository root. By default, the root is inferred from the source package layout. Set `ASCEND_KERNEL_BENCH_REPO_ROOT` to a checkout path when using an installed package whose location is separate from those data directories.
 
 ```bash
-export AKB_REPO_ROOT=/path/to/AscendKernelBench
+export ASCEND_KERNEL_BENCH_REPO_ROOT=/path/to/AscendKernelBench
 ```
 
 Prompt examples live inside the package and are included as package data. The vendored corpus and top-level configuration/build directories remain repository assets. A wheel installation alone is therefore not a replacement for the checkout.

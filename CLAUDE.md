@@ -5,8 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Working agreement
 
 [`AGENTS.md`](AGENTS.md) is the canonical, actively maintained agent contract for
-this repository — architecture, module boundaries, invariants, change recipes, and
-notes about this specific checkout. It is imported below so it loads with this file:
+this repository — architecture, module boundaries, invariants, comment style, change
+recipes, and notes about this specific checkout. It is imported below so it loads with
+this file:
 
 @AGENTS.md
 
@@ -14,34 +15,39 @@ notes about this specific checkout. It is imported below so it loads with this f
 invariant that `AGENTS.md` documents, update `AGENTS.md` in the same change. Keep this
 file to Claude-Code-specific additions only; do not copy the contract here.
 
+Call the project AscendKernelBench in everything you write, including commit messages.
+Do not abbreviate it as akb.
+
 ## Commands
 
 ```bash
-# Setup — works on any machine, no torch and no NPU required
-python -m pip install -e ".[dev]"
+# Setup — any machine, no torch and no NPU required; requirements.txt is the
+# only dependency file and installs the pinned torch pair on Linux only.
+python -m pip install -r requirements.txt
 
 # Quality gate; both must pass before a change is done
-pytest -q                                   # 95 passed, 2 skipped (the 2 skip without torch)
-pre-commit run --all-files
-ruff check . && ruff format --check .       # offline fallback: pre-commit cannot fetch hooks here
+pytest -q                                   # 107 passed, 2 skipped (2 skip without torch)
+pre-commit run --all-files                  # works once hook envs are cached
+ruff check . && ruff format --check .       # fallback when the hook fetch fails
 
-# Narrower test runs (pytest runs from the checkout root; pyproject sets pythonpath = ["src"])
+# Narrower test runs (from the checkout root; pyproject sets pythonpath = ["src"])
 pytest -q tests/test_score.py
 pytest -q tests/test_score.py::test_summarize_includes_mean_sol
 pytest -q -k pass_at_k
 
 # Workflow CLIs (from the checkout root)
-python scripts/generate.py --task level1/19_ReLU --model <model> \
-    --hardware ascend910b2 --run-name relu_demo
-ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py relu_demo [level]
-python scripts/analyze.py relu_demo          # offline: reads existing JSON, no torch or NPU
+export OPENAI_BASE_URL=https://api.deepseek.com/v1 OPENAI_API_KEY=<key>
+python scripts/generate.py --tasks-file configs/subsets/level1_20.txt \
+    --model deepseek-flash --reasoning-effort high --run-name level1_20
+ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py level1_20 [level]
+python scripts/analyze.py level1_20         # offline: reads existing JSON, no torch or NPU
 ```
 
-Compiling and timing kernels needs an Ascend NPU and the `akb` conda env; under this
-container's default sandbox, device access fails with `aclInit ... 507899` — a sandbox
-artifact, not a broken driver. See "Local host notes" in `AGENTS.md` before diagnosing
-any NPU error. Orchestration, prompt building, lint, unit tests, and offline analysis
-all work with no device.
+Compiling and timing kernels needs the AscendKernelBench conda env and an Ascend NPU.
+Under this container's default sandbox, device access fails with `aclInit ... 507899` —
+a sandbox artifact, not a broken driver. See "Local host notes" in `AGENTS.md` before
+diagnosing any NPU error. Orchestration, prompt building, lint, unit tests, and offline
+analysis all work with no device.
 
 ## Architecture in brief
 
@@ -66,7 +72,12 @@ host code calls `eval.evaluate_run`; `eval_device` and `worker_main` are worker-
 only; `score.py` never loads kernels, tasks, or NPU libraries. `_paths.py` anchors all
 data directories (configs, tasks, build template, `runs/`, `results/`) to the
 repository root, so a wheel install alone is not a working checkout — override with
-`AKB_REPO_ROOT`.
+`ASCEND_KERNEL_BENCH_REPO_ROOT`.
+
+Generation talks to an OpenAI-compatible endpoint. `deepseek-flash` accepts
+`reasoning_effort` and rejects `response_format`, so its answers arrive as a JSON
+object with the two deliverable fields; `llm.py` accepts that layout and fenced code
+blocks, and the note appended to every prompt asks for the JSON form.
 
 The non-obvious rules that break things when violated (global `custom_opp_*.run`
 installs, a second build path, host-side compute in the wrapper, using

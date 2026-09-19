@@ -87,30 +87,31 @@ no SOL score.
 
 ## Quick start
 
-Use Python 3.10 or later. On an Ascend host the recommended experiment
-environment is conda env `akb` with **PyTorch 2.10.0** and
-**torch-npu 2.10.0.post6** (CANN 9.1.0 pairing):
+Use Python 3.10 or later. All dependencies live in `requirements.txt`. On an
+Ascend host the recommended experiment environment is the conda env
+**AscendKernelBench** (Python 3.12) with the CANN 9.1.0 pairing
+**PyTorch 2.10.0** + **torch-npu 2.10.0.post6**:
 
 ```bash
 git clone https://github.com/wuzhenqing/AscendKernelBench.git
 cd AscendKernelBench
 
-# Host without an NPU: orchestration, lint, and unit tests
+# Host without an NPU: generation, analysis, lint, and unit tests
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install -r requirements.txt
 ```
 
-On a Linux Ascend host with CANN 9.1.0, create the experiment env:
+On a Linux Ascend host with CANN 9.1.0:
 
 ```bash
-conda env create -f environment.yml
-conda activate akb
+conda create -n AscendKernelBench python=3.12 -y
+conda activate AscendKernelBench
 source /usr/local/Ascend/cann-9.1.0/set_env.sh
-python -m pip install -e ".[dev]"
+python -m pip install -r requirements.txt
 ```
 
-The base extra does **not** install CANN, the NPU driver, or a hardware
+These dependencies do **not** include CANN, the NPU driver, or a hardware
 runtime. See [getting started](docs/guide/getting-started.md).
 
 Generate (any machine with network access to your LLM):
@@ -131,6 +132,18 @@ Evaluate and report (Ascend host, exclusive device):
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py relu_demo
 python scripts/analyze.py relu_demo
+```
+
+For model-to-model or revision-to-revision comparisons, generate a fixed task
+set instead of a single task. `configs/subsets/level1_20.txt` holds 20 level 1
+tasks sampled systemically (every fifth task), and `--tasks-file` reads it:
+
+```bash
+python scripts/generate.py \
+  --tasks-file configs/subsets/level1_20.txt \
+  --model your-served-model \
+  --hardware ascend910b2 \
+  --run-name level1_20
 ```
 
 ## Command-line tools
@@ -180,17 +193,17 @@ and must be validated before use.
 KernelBench/                 Vendored reference tasks, level1–level4
 src/ascend_kernel_bench/     Generation, build, evaluation, and scoring
 scripts/                     Five benchmark CLIs
-configs/                     Eval defaults and hardware profiles
+configs/                     Eval defaults, hardware profiles, task subsets
 build_template/              CMake project that writes libcustom_op.so
 docs/                        English Markdown guides and references
 .github/workflows/           Lint and unit-test quality gate
-environment.yml              Conda recipe for the akb experiment env
+requirements.txt             Backbone dependencies for every machine
 ```
 
 ## Development
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -r requirements.txt
 pre-commit install
 pre-commit run --all-files
 pytest

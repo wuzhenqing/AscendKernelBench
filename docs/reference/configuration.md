@@ -1,6 +1,6 @@
 # Configuration
 
-Evaluation settings live in `configs/eval_default.yaml`. Hardware descriptions live in `configs/hardware/`. CLI scripts load these files using `src/ascend_kernel_bench/config.py`.
+Evaluation settings live in `configs/eval_default.yaml`. Hardware descriptions live in `configs/hardware/`, and fixed task subsets in `configs/subsets/`. CLI scripts load these files using `src/ascend_kernel_bench/config.py`.
 
 ## Precedence and loading
 
@@ -48,11 +48,16 @@ These are nested under `generation`:
 
 | Key | Default | Used by |
 | --- | --- | --- |
-| `model` | `deepseek-v4-flash` | `generate.py` |
+| `model` | `deepseek-flash` | `generate.py` |
 | `temperature` | `0.0` | `generate.py` |
-| `max_tokens` | `16384` | `generate.py`; no CLI override |
+| `max_tokens` | `131072` | `generate.py`, or `--max-tokens` |
 | `num_samples` | `1` | `generate.py` |
 | `prompt_mode` | `one_shot` | `generate.py` |
+| `reasoning_effort` | `high` | `generate.py`, or `--reasoning-effort` |
+
+`reasoning_effort` is sent as a request parameter only when set; leave it
+empty for endpoints that reject it. Reasoning tokens count against
+`max_tokens`.
 
 The model name is passed to your endpoint. Set it to a model your service supports. `zero_shot` omits examples, `one_shot` uses the first bundled example, and `few_shot` uses all bundled examples. The repository currently ships two examples (elementwise add and LeakyReLU).
 
@@ -75,9 +80,10 @@ tolerances:
 generation:
   model: your-served-model-name
   temperature: 0.7
-  max_tokens: 16384
+  max_tokens: 131072
   num_samples: 10
   prompt_mode: one_shot
+  reasoning_effort: high
 ```
 
 Use a custom YAML for generation. Evaluation loads `configs/eval_default.yaml` and the hardware name recorded in the run:
@@ -127,8 +133,8 @@ Pass a custom profile with `--hardware configs/hardware/my-device.yaml`, or save
 | `OPENAI_BASE_URL` | Endpoint URL used by `LLMClient`. The CLI has no endpoint URL flag. |
 | `OPENAI_API_KEY` | Credential passed to the endpoint client. The CLI has no API key flag. |
 | `CANN_SET_ENV` | Path to the environment script used by the build helper. Defaults to `/usr/local/Ascend/cann-9.1.0/set_env.sh`. |
-| `AKB_REPO_ROOT` | Override the root used for configs, tasks, build templates, results, and runs. Set it before starting Python. |
-| `AKB_ENABLE_CCACHE` | When set to `1` / `true` / `yes` / `on`, the ACLNN CMake configure step receives `-DENABLE_CCACHE=ON`. |
+| `ASCEND_KERNEL_BENCH_REPO_ROOT` | Override the root used for configs, tasks, build templates, results, and runs. Set it before starting Python. |
+| `ASCEND_KERNEL_BENCH_ENABLE_CCACHE` | When set to `1` / `true` / `yes` / `on`, the ACLNN CMake configure step receives `-DENABLE_CCACHE=ON`. |
 | `ASCEND_SLOG_PRINT_TO_STDOUT` | The build/evaluation code defaults this to `0` in child environments when it is unset, to reduce runtime log output. |
 | `ASCEND_RT_VISIBLE_DEVICES` | Restrict which physical NPUs the process can see. Evaluation always addresses `npu:0` inside that visible set. |
 
@@ -137,7 +143,7 @@ If the selected CANN environment script exists, the build helper sources it thro
 The default repository root is derived from the source package location. A checkout installation is the supported workflow documented here. If you install the Python package elsewhere, keep a checkout containing the external data directories and set:
 
 ```bash
-export AKB_REPO_ROOT=/absolute/path/to/AscendKernelBench
+export ASCEND_KERNEL_BENCH_REPO_ROOT=/absolute/path/to/AscendKernelBench
 ```
 
 This redirects data paths; it does not install the scripts, change the working directory, or select a Python environment. The `scripts/*.py` launchers still load source from their own checkout. See [architecture](architecture.md) for the repository layout.

@@ -6,19 +6,21 @@ review contract for the Python engine, scripts, tests, and docs.
 ## Development environment
 
 ```bash
-# Orchestration / lint / tests (any machine)
+# Dependencies, lint, and tests (any machine)
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install -r requirements.txt
 pre-commit install
 
 # Optional: Ascend host experiment env
-conda activate akb
+conda activate AscendKernelBench
 source /usr/local/Ascend/cann-9.1.0/set_env.sh
 ```
 
-`akb` pins Python 3.12, PyTorch 2.10.0, and torch-npu 2.10.0.post6 for
-CANN 9.1.0. Recreate it with `conda env create -f environment.yml`.
+The AscendKernelBench env pins Python 3.12, PyTorch 2.10.0, and
+torch-npu 2.10.0.post6 for CANN 9.1.0. Recreate it with
+`conda create -n AscendKernelBench python=3.12 -y` and
+`python -m pip install -r requirements.txt`.
 
 ## Style gate
 

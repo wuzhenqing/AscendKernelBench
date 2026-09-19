@@ -28,7 +28,7 @@ python scripts/generate.py \
 
 This command makes real API requests and saves one candidate. It does not compile or evaluate the candidate. A successful response checks the connection and basic response structure; it does not establish kernel correctness.
 
-`--model` overrides `generation.model` in the evaluation YAML. The checked-in default is `deepseek-v4-flash`; this is a configuration value, not a guarantee that your service offers the model. There are no provider-specific adapters or `--base-url` / `--api-key` CLI options.
+`--model` overrides `generation.model` in the evaluation YAML. The checked-in default is `deepseek-flash`; this is a configuration value, not a guarantee that your service offers the model. There are no provider-specific adapters or `--base-url` / `--api-key` CLI options.
 
 ## Response format and retries
 
@@ -39,7 +39,7 @@ The client first requests a structured response with two string fields:
 | `custom_op_asc` | The complete `custom_op.asc` source, including the kernel, host launcher, and a process-local `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL` binding. |
 | `model_new_py` | The complete `model_new.py` source defining `ModelNew`. |
 
-If the structured request or parsing fails, the client makes a plain Chat Completions request and extracts fenced code blocks. It recognizes filename tags (`custom_op.asc`, `model_new.py`), then language tags (`cpp` / `asc`, `python`), and finally the first two blocks in Ascend C then Python order. A raw JSON answer to this fallback request is not decoded as JSON.
+If the structured request or parsing fails, the client makes a plain Chat Completions request and decodes either layout: a JSON object holding the two fields, or fenced code blocks. Fenced blocks are matched by filename tag (`custom_op.asc`, `model_new.py`), then language tag (`cpp` / `asc`, `python`), then the first two blocks in Ascend C then Python order. Endpoints that reject `response_format`, such as DeepSeek-compatible services, answer the structured request with that JSON object, so the JSON layout is the one used there.
 
 Both paths strip outer Markdown fences and check for these minimum markers:
 
@@ -50,7 +50,7 @@ These are content checks. The more detailed static checks run during evaluation,
 
 The generation loop permits one retry after an invalid result or exception. Each attempt may include both a structured and a plain request, and the SDK may perform additional transport retries. One requested sample therefore does not necessarily equal one API request. The plain fallback is attempted after any structured-path exception, including connection and authentication errors, so inspect the underlying error when troubleshooting.
 
-The client sends `temperature` and `max_tokens`; the selected model and endpoint must accept those parameters. The CLI exposes `--temperature`, while `generation.max_tokens` is set in YAML. The client constructor's default request timeout is 600 seconds; it has no dedicated CLI option and is independent of the NPU evaluation timeouts.
+The client sends `temperature` and `max_tokens`, and `reasoning_effort` when it is configured; the selected model and endpoint must accept those parameters. The CLI exposes `--temperature`, `--max-tokens`, and `--reasoning-effort`; the same values can be set under `generation` in YAML. The client constructor's default request timeout is 1800 seconds, sized for reasoning models that deliberate for many minutes on one sample; it has no dedicated CLI option and is independent of the NPU evaluation timeouts. Note that the SDK retries a timed-out request, so a slow sample can consume several attempts.
 
 ## Saved generation artifacts
 
