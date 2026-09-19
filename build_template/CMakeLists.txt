@@ -1,24 +1,9 @@
-# AscendKernelBench ACLNN operator project (process-local shared library).
-#
-# Contract: the LLM writes a single self-contained `custom_op.asc` that
-# registers with TORCH_LIBRARY / TORCH_LIBRARY_IMPL. This template — aligned
-# with the modern CMake + torch.library sample in asc-devkit — compiles that
-# file into libcustom_op.so. The evaluator then calls torch.ops.load_library
-# on that file inside the PyTorch process.
-#
-# Deliberately NOT an OPP/custom_opp package and NOT a pybind extension:
-#   - no npu_op_package / custom_opp_*.run
-#   - no pybind11 / PYBIND11_MODULE
-#   - CMAKE_SKIP_INSTALL_RULES is ON so `cmake --install` cannot write into
-#     site-packages or $ASCEND_OPP_PATH/vendors
-#   - RPATH is baked to $ORIGIN plus Torch / torch_npu / CANN lib dirs so
-#     loading does not require mutating a shared global environment
-#
-# Requires: CANN >= 9.1.0 (source <cann>/set_env.sh), torch and torch_npu
-# importable by the Python3 interpreter found by CMake.
-#
-# CMAKE_ASC_ARCHITECTURES is injected by build.py from the hardware profile
-# (e.g. dav-2201, dav-3510).
+# AscendKernelBench kernel build template: compiles custom_op.asc into a
+# process-local libcustom_op.so loaded with torch.ops.load_library. Never an
+# OPP package (no custom_opp_*.run), never a pybind module.
+
+# CMAKE_ASC_ARCHITECTURES is injected by build.py from the hardware profile.
+# Requires CANN 9.1.0 or newer, with torch and torch_npu importable.
 
 cmake_minimum_required(VERSION 3.16)
 
@@ -27,7 +12,7 @@ if(NOT DEFINED CMAKE_ASC_ARCHITECTURES OR "${CMAKE_ASC_ARCHITECTURES}" STREQUAL 
 endif()
 set(CMAKE_ASC_ARCHITECTURES "${CMAKE_ASC_ARCHITECTURES}" CACHE STRING "NPU architecture" FORCE)
 
-# Never install this operator into the global Python or CANN tree.
+# Keeps cmake --install out of site-packages and ASCEND_OPP_PATH/vendors.
 set(CMAKE_SKIP_INSTALL_RULES ON)
 
 find_package(ASC REQUIRED)
@@ -42,9 +27,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# Optional ccache (same switch as the official ACLNN operator-project samples).
-# Enable from the evaluator with -DENABLE_CCACHE=ON. The ASC launcher matters
-# most: compiling the .asc translation unit dominates the build time.
+# Optional ccache, enabled with -DENABLE_CCACHE=ON. The ASC launcher matters
+# most: the .asc translation unit dominates build time.
 option(ENABLE_CCACHE "Enable ccache compiler launcher" OFF)
 if(ENABLE_CCACHE)
     find_program(CCACHE_PROGRAM ccache)
@@ -58,9 +42,8 @@ if(ENABLE_CCACHE)
     endif()
 endif()
 
-# Derive a GCC toolchain root for the ASC/bisheng front-end: when .asc sources
-# include torch/extension.h, the LLVM-based compiler needs an explicit
-# --gcc-toolchain so C++ standard library headers resolve consistently.
+# The ASC/bisheng front-end is LLVM based, so it needs an explicit
+# --gcc-toolchain to resolve C++ standard library headers.
 execute_process(
     COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libgcc.a
     OUTPUT_VARIABLE LIBGCC_PATH
@@ -81,18 +64,19 @@ find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
 execute_process(
     COMMAND ${CMAKE_COMMAND} -E env ASCEND_SLOG_PRINT_TO_STDOUT=0
-            ${Python3_EXECUTABLE} -c "import torch; print(torch.utils.cmake_prefix_path)"
+            ${Python3_EXECUTABLE} -c "import os, torch, torch_npu; print(torch.utils.cmake_prefix_path); print(os.path.dirname(torch_npu.__file__))"
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    OUTPUT_VARIABLE TORCH_CMAKE_PREFIX_PATH
+    OUTPUT_VARIABLE TORCH_DISCOVERY
+    RESULT_VARIABLE TORCH_DISCOVERY_RESULT
 )
+if(NOT TORCH_DISCOVERY_RESULT EQUAL 0)
+    message(FATAL_ERROR "torch / torch_npu discovery failed in ${Python3_EXECUTABLE}")
+endif()
+string(REPLACE "\n" ";" TORCH_DISCOVERY_LIST "${TORCH_DISCOVERY}")
+list(GET TORCH_DISCOVERY_LIST 0 TORCH_CMAKE_PREFIX_PATH)
+list(GET TORCH_DISCOVERY_LIST 1 TORCH_NPU_PATH)
 find_package(Torch REQUIRED HINTS ${TORCH_CMAKE_PREFIX_PATH})
 
-execute_process(
-    COMMAND ${CMAKE_COMMAND} -E env ASCEND_SLOG_PRINT_TO_STDOUT=0
-            ${Python3_EXECUTABLE} -c "import os, torch_npu; print(os.path.dirname(torch_npu.__file__))"
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    OUTPUT_VARIABLE TORCH_NPU_PATH
-)
 set(TORCH_NPU_INCLUDE_DIRS ${TORCH_NPU_PATH}/include)
 set(TORCH_NPU_LIBRARIES ${TORCH_NPU_PATH}/lib)
 
@@ -121,8 +105,9 @@ target_link_directories(custom_op PRIVATE
     ${TORCH_NPU_LIBRARIES}
 )
 
-# Runtime search path: the .so is loaded from the sample directory, so it
-# must find Torch / torch_npu / CANN without a global install step.
+########################## RPATH ##########################
+# The library is loaded from the sample directory, so it must find Torch,
+# torch_npu and CANN without a global install step.
 set(_CUSTOM_OP_RPATH "$ORIGIN")
 if(DEFINED TORCH_INSTALL_PREFIX AND NOT "${TORCH_INSTALL_PREFIX}" STREQUAL "")
     list(APPEND _CUSTOM_OP_RPATH "${TORCH_INSTALL_PREFIX}/lib")
@@ -142,6 +127,7 @@ set_property(TARGET custom_op PROPERTY BUILD_RPATH ${_CUSTOM_OP_RPATH})
 set_property(TARGET custom_op PROPERTY INSTALL_RPATH ${_CUSTOM_OP_RPATH})
 set_property(TARGET custom_op PROPERTY BUILD_WITH_INSTALL_RPATH TRUE)
 message(STATUS "custom_op RPATH: ${_CUSTOM_OP_RPATH}")
+########################## RPATH ##########################
 
 target_link_options(custom_op PRIVATE
     --gcc-toolchain=${GCC_TOOLCHAIN_ROOT}

@@ -1,8 +1,7 @@
 """Isolated evaluation of generated Ascend C samples.
 
-The public host entry point is :func:`evaluate_run`. Static check, then
-build, correctness, and timing run in a worker subprocess. See
-docs/guide/evaluation.md for the evaluation protocol.
+Static check runs on the host; build, correctness, and timing run in the
+worker subprocess started by evaluate_run.
 """
 
 from __future__ import annotations
@@ -45,14 +44,14 @@ __all__ = [
 def _persist_eval_result(
     sample_dir: Path, result: dict[str, Any]
 ) -> dict[str, Any]:
-    """Write ``eval_result.json`` when ``sample_dir`` exists and return it."""
+    """Write eval_result.json when sample_dir exists and return it."""
     if Path(sample_dir).is_dir():
         write_json_atomic(Path(sample_dir) / "eval_result.json", result)
     return result
 
 
 def _load_run_settings(run_dir: Path) -> tuple[EvalConfig, HardwareProfile]:
-    """Load the default protocol and the hardware recorded for ``run_dir``."""
+    """Load the default protocol and the hardware recorded for run_dir."""
     config = load_eval_config()
     hw_name = rundir.generation_hardware_name(run_dir) or config.hardware
     return config, load_hardware_profile(hw_name)
@@ -67,11 +66,10 @@ def eval_sample(
 ) -> dict[str, Any]:
     """Host entry: static check, then isolated worker subprocess.
 
-    ``sample_dir`` must already contain ``custom_op.asc`` and
-    ``model_new.py``. The result dict is also written to
-    ``sample_dir/eval_result.json``.
+    sample_dir must already hold custom_op.asc and model_new.py; the
+    returned dict is also written to sample_dir/eval_result.json.
     """
-    sample_dir = Path(sample_dir)
+    sample_dir = Path(sample_dir).resolve()
     model_new_path = sample_dir / "model_new.py"
     asc_path = sample_dir / "custom_op.asc"
     if not asc_path.is_file() or not model_new_path.is_file():
@@ -130,18 +128,10 @@ def evaluate_run(
 ) -> dict[str, list[dict[str, Any]]]:
     """Evaluate complete samples in a run and write aggregates.
 
-    Each selected sample is checked and isolated through
-    :func:`eval_sample`. After the batch finishes, ``eval_results.json``
-    and ``pass_at_k_results.json`` are rewritten from every stored
-    per-sample result in the run, including levels that were not
-    re-evaluated.
-
     Args:
-        run: Run directory name under ``runs/``, or an existing path.
-        level: When set, only evaluate samples under ``level{level}/``.
-        on_sample: Optional ``(task_id, sample_id, result)`` callback
-            invoked after each evaluated sample. Used by the CLI for
-            progress.
+        run: Run directory name under runs/, or an existing path.
+        level: When set, only evaluate samples under level{level}/.
+        on_sample: Called with (task_id, sample_id, result) after each sample.
 
     Returns:
         KernelBench-compatible mapping of task id to sample result dicts.
@@ -183,7 +173,7 @@ def _worker_argv(cfg_path: Path) -> list[str]:
 
 
 def worker_main(argv: list[str]) -> None:
-    """Read ``cfg.json``, evaluate one sample, and write ``result_path``."""
+    """Read cfg.json, evaluate one sample, and write result_path."""
     from .log import setup_logging
 
     setup_logging(rich_tracebacks=False)

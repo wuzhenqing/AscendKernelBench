@@ -1,10 +1,12 @@
 """Shared CLI helpers: settings resolution, task selection, and reports.
 
-Reporting lives in :mod:`.report`. This module keeps the generation and
-evaluation setting factories that the batch scripts share.
+Reporting lives in .report; this module keeps the generation and evaluation
+setting factories that the batch scripts share.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
@@ -30,6 +32,7 @@ __all__ = [
     "generation_run_config",
     "load_eval_runtime",
     "print_eval_report",
+    "read_task_ids",
     "resolve_generation_settings",
     "sample_status_label",
     "select_tasks",
@@ -46,6 +49,7 @@ class GenerationSettings(BaseModel):
     temperature: float
     max_tokens: int
     num_samples: int
+    reasoning_effort: str | None = None
 
 
 def resolve_generation_settings(
@@ -55,34 +59,33 @@ def resolve_generation_settings(
     prompt_mode: str | None = None,
     temperature: float | None = None,
     num_samples: int | None = None,
+    reasoning_effort: str | None = None,
+    max_tokens: int | None = None,
 ) -> GenerationSettings:
-    """Resolve generation settings from YAML with optional CLI overrides.
-
-    Args:
-        config: Loaded evaluation configuration.
-        model: Optional ``--model`` override.
-        prompt_mode: Optional ``--prompt-mode`` override.
-        temperature: Optional ``--temperature`` override.
-        num_samples: Optional ``--n-samples`` override.
-
-    Returns:
-        Frozen settings used by ``generate.py``.
-    """
+    """Resolve generation settings from YAML with optional CLI overrides."""
     gen_cfg = dict(config.generation)
+    effort = (
+        reasoning_effort or str(gen_cfg.get("reasoning_effort", "")).strip()
+    )
     return GenerationSettings(
-        model=model or str(gen_cfg.get("model", "deepseek-v4-flash")),
+        model=model or str(gen_cfg.get("model", "deepseek-flash")),
         prompt_mode=prompt_mode or str(gen_cfg.get("prompt_mode", "one_shot")),
         temperature=float(
             gen_cfg.get("temperature", 0.0)
             if temperature is None
             else temperature
         ),
-        max_tokens=int(gen_cfg.get("max_tokens", 16384)),
+        max_tokens=(
+            int(gen_cfg.get("max_tokens", 131072))
+            if max_tokens is None
+            else int(max_tokens)
+        ),
         num_samples=(
             int(gen_cfg.get("num_samples", 1))
             if num_samples is None
             else int(num_samples)
         ),
+        reasoning_effort=effort or None,
     )
 
 
@@ -102,12 +105,8 @@ def load_eval_runtime(
 ) -> EvalRuntime:
     """Load YAML defaults and resolve the hardware profile.
 
-    Args:
-        config_path: Optional ``--config`` path.
-        hardware: Optional ``--hardware`` name or YAML path.
-
-    Returns:
-        Frozen config and hardware used by the benchmark CLIs.
+    hardware names a profile or points at a YAML file, and overrides the
+    config when given.
 
     Raises:
         FileNotFoundError: If the config or hardware YAML is missing.
@@ -119,22 +118,36 @@ def load_eval_runtime(
     )
 
 
+def read_task_ids(path: str | Path) -> list[str]:
+    """Read task ids from a manifest file, one per line.
+
+    Blank lines and lines starting with a hash are skipped, so a manifest
+    can carry a header.
+    """
+    ids = []
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        entry = line.strip()
+        if entry and not entry.startswith("#"):
+            ids.append(entry)
+    return ids
+
+
 def select_tasks(
     *,
     level: int | None = None,
     task_ids: list[str] | None = None,
+    tasks_file: str | Path | None = None,
 ) -> list[Task]:
-    """Load tasks from explicit IDs, one level, or the full corpus.
-
-    Args:
-        level: Optional ``--level`` filter.
-        task_ids: Optional repeated ``--task`` identifiers.
+    """Load tasks from explicit IDs, a manifest file, a level, or the corpus.
 
     Returns:
-        Loaded tasks. Explicit IDs win over ``level``.
+        Loaded tasks. Explicit IDs win over a manifest, which wins over
+        level.
     """
     if task_ids is not None:
         return [load_task(item) for item in task_ids]
+    if tasks_file is not None:
+        return [load_task(item) for item in read_task_ids(tasks_file)]
     if level is not None:
         return discover_tasks(level=level)
     return discover_tasks()
@@ -147,16 +160,9 @@ def generation_run_config(
     task_ids: list[str],
     **extra: object,
 ) -> dict[str, object]:
-    """Return the mapping written to ``generation_config.yaml``.
+    """Return the mapping written to generation_config.yaml.
 
-    Args:
-        settings: Resolved generation settings.
-        hardware_name: Hardware profile name.
-        task_ids: Task identifiers included in the run.
-        **extra: Optional extra keys such as ``device``.
-
-    Returns:
-        YAML-serializable generation record.
+    Extra keyword arguments, such as device, are merged into the record.
     """
     payload: dict[str, object] = {
         "model": settings.model,
@@ -164,6 +170,7 @@ def generation_run_config(
         "max_tokens": settings.max_tokens,
         "prompt_mode": settings.prompt_mode,
         "num_samples": settings.num_samples,
+        "reasoning_effort": settings.reasoning_effort,
         "hardware": hardware_name,
         "tasks": list(task_ids),
     }

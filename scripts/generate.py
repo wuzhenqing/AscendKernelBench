@@ -1,12 +1,7 @@
 #!/usr/bin/env python
-"""Batch generation: n samples per task, saved under runs/{run_name}/.
+"""Generate n samples per task into runs/{run_name}/.
 
-Generation is decoupled from evaluation (docs/guide/workflows.md):
-samples land on disk and can be evaluated later, including on another
-machine.
-
-Example:
-    python scripts/generate.py --level 1 --n-samples 2 --run-name dev_run
+Samples land on disk and can be evaluated later, on this or another machine.
 """
 
 from __future__ import annotations
@@ -48,11 +43,23 @@ def main() -> None:
     parser.add_argument("--model", default=None)
     parser.add_argument("--hardware", default=None)
     parser.add_argument(
+        "--tasks-file",
+        default=None,
+        help="manifest of task ids, one per line; see configs/subsets/",
+    )
+    parser.add_argument(
         "--prompt-mode",
         default=None,
         choices=["zero_shot", "one_shot", "few_shot"],
     )
     parser.add_argument("--temperature", type=float, default=None)
+    parser.add_argument("--max-tokens", type=int, default=None)
+    parser.add_argument(
+        "--reasoning-effort",
+        default=None,
+        choices=["low", "medium", "high"],
+        help="thinking depth; omitted when unset",
+    )
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--config", default=None)
     args = parser.parse_args()
@@ -68,9 +75,15 @@ def main() -> None:
         prompt_mode=args.prompt_mode,
         temperature=args.temperature,
         num_samples=args.n_samples,
+        reasoning_effort=args.reasoning_effort,
+        max_tokens=args.max_tokens,
     )
 
-    tasks = select_tasks(level=args.level, task_ids=args.task)
+    tasks = select_tasks(
+        level=args.level,
+        task_ids=args.task,
+        tasks_file=args.tasks_file,
+    )
     if not tasks:
         die("no tasks found")
 
@@ -94,6 +107,7 @@ def main() -> None:
         settings.model,
         temperature=settings.temperature,
         max_tokens=settings.max_tokens,
+        reasoning_effort=settings.reasoning_effort,
     )
     total = len(tasks) * settings.num_samples
     failures = 0

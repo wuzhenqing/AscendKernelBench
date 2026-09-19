@@ -1,0 +1,23 @@
+# Fixed 20-task subset of level1 (systematic sample: every 5th task).
+# Rule: sort level1 by numeric file stem, take indexes 5,10,...,100.
+# Keep this list stable so runs stay comparable across iterations.
+level1/5_Matrix_scalar_multiplication
+level1/10_3D_tensor_matrix_multiplication
+level1/15_Matmul_for_lower_triangular_matrices
+level1/20_LeakyReLU
+level1/25_Swish
+level1/30_Softsign
+level1/35_GroupNorm_
+level1/40_LayerNorm
+level1/45_Average_Pooling_2D
+level1/50_conv_standard_2D__square_input__square_kernel
+level1/55_conv_standard_2D__asymmetric_input__square_kernel
+level1/60_conv_standard_3D__square_input__asymmetric_kernel
+level1/65_conv_transposed_2D__square_input__asymmetric_kernel
+level1/70_conv_transposed_3D__asymmetric_input__square_kernel
+level1/75_conv_transposed_2D_asymmetric_input_asymmetric_kernel_strided__grouped____padded____dilated__
+level1/80_conv_standard_2D_square_input_asymmetric_kernel___dilated____padded__
+level1/85_conv_depthwise_2D_asymmetric_input_asymmetric_kernel
+level1/90_cumprod
+level1/95_CrossEntropyLoss
+level1/100_HingeLoss

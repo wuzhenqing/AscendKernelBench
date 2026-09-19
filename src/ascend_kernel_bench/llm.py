@@ -1,17 +1,12 @@
-"""OpenAI-compatible LLM client with pydantic-structured output.
+"""OpenAI-compatible LLM client for Ascend C generation.
 
-See docs/deploy_llm_service.md for the endpoint and response contracts.
-
-The endpoint is whatever ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY`` point to.
-Structured generation uses the OpenAI ``parse`` API with a pydantic model so
-the two deliverables (``custom_op_asc``, ``model_new_py``) arrive as typed
-fields — no hand-rolled field parsing. Endpoints without structured-output
-support fall back to fenced-code-block extraction, still validated by the
-same pydantic model.
+Structured output uses the OpenAI parse API with a pydantic model; endpoints
+without it fall back to JSON field or fenced-block extraction.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Protocol
@@ -84,7 +79,7 @@ class ResponseParser(Protocol):
     name: str
 
     def parse(self, messages: list[dict]) -> GenerationResult:
-        """Parse ``messages`` into a :class:`GenerationResult`."""
+        """Parse messages into a GenerationResult."""
         ...
 
 
@@ -99,7 +94,7 @@ STRUCTURED_OUTPUT_NOTE = (
 
 
 def _usage_dict(response: object) -> dict:
-    """Return ``response.usage`` as a dict, or ``{}`` when absent."""
+    """Return response.usage as a dict, or {} when absent."""
     usage = getattr(response, "usage", None)
     if usage is None:
         return {}
@@ -114,9 +109,6 @@ _MIN_PY_MARKERS = ("class ModelNew", "torch.ops.custom_op")
 
 def validate_generation(gen: AscendCGeneration) -> list[str]:
     """Sanity-check that the fields carry real file content.
-
-    Args:
-        gen: Parsed deliverables.
 
     Returns:
         Human-readable problems; empty means the fields look complete.
@@ -146,28 +138,25 @@ class LLMClient:
         base_url: str | None = None,
         api_key: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 16384,
-        timeout: float = 600.0,
+        max_tokens: int = 131072,
+        timeout: float = 1800.0,
+        reasoning_effort: str | None = None,
     ) -> None:
-        """Create a client for one generation model.
-
-        Args:
-            model: Served model name passed to the OpenAI-compatible API.
-            base_url: Endpoint URL; defaults to ``OPENAI_BASE_URL``.
-            api_key: Credential; defaults to ``OPENAI_API_KEY``.
-            temperature: Sampling temperature.
-            max_tokens: Completion token budget.
-            timeout: Request timeout in seconds.
-        """
+        """Create a client for one generation model."""
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
+        self.extra_body = (
+            {"reasoning_effort": reasoning_effort} if reasoning_effort else None
+        )
         self.client = OpenAI(
             base_url=base_url or os.environ.get("OPENAI_BASE_URL"),
             api_key=api_key or os.environ.get("OPENAI_API_KEY"),
             timeout=timeout,
         )
 
+    ################################ PROTOCOL ################################
     def generate(
         self,
         prompt: str,
@@ -177,21 +166,9 @@ class LLMClient:
     ) -> GenerationResult:
         """Generate one sample via structured parse, else fenced blocks.
 
-        The response is validated for real file content; an invalid answer is
-        retried once with an explicit correction reminder.
-
-        Args:
-            prompt: User prompt (the structured-output note is appended).
-            system: Optional system message.
-            max_retries: Extra attempts after the first failed parse or
-                validation. Default is one retry.
-
-        Returns:
-            Parsed deliverables plus the raw response text.
-
         Raises:
-            ValueError: If every attempt fails validation or the endpoint
-                returns no usable fenced blocks.
+            ValueError: If every attempt fails validation or the
+                endpoint returns no usable fenced blocks.
         """
         messages = []
         if system:
@@ -216,6 +193,8 @@ class LLMClient:
                 last_error = exc
                 last_raw = ""
         raise ValueError(f"generation failed validation: {last_error}")
+
+    ################################ PROTOCOL ################################
 
     def _parsers(self) -> tuple[ResponseParser, ...]:
         """Return structured parse first, then fenced-block fallback."""
@@ -253,6 +232,7 @@ class StructuredOutputParser:
             response_format=AscendCGeneration,
             temperature=self._llm.temperature,
             max_tokens=self._llm.max_tokens,
+            extra_body=self._llm.extra_body,
         )
         parsed = response.choices[0].message.parsed
         if parsed is None:
@@ -281,8 +261,15 @@ class FencedBlockParser:
             messages=messages,
             temperature=self._llm.temperature,
             max_tokens=self._llm.max_tokens,
+            extra_body=self._llm.extra_body,
         )
-        raw = response.choices[0].message.content or ""
+        choice = response.choices[0]
+        if choice.finish_reason == "length":
+            raise ValueError(
+                "response truncated at max_tokens; raise "
+                "generation.max_tokens or lower reasoning_effort"
+            )
+        raw = choice.message.content or ""
         return GenerationResult(
             generation=extract_generation(raw),
             raw_text=raw,
@@ -313,25 +300,19 @@ _FENCE_RE = re.compile(
 
 
 def extract_generation(text: str) -> AscendCGeneration:
-    """Extract the two deliverables from fenced code blocks.
-
-    Recognised layouts (in priority order):
-    1. Blocks tagged with filenames (```custom_op.asc / ```model_new.py).
-    2. A C++-tagged block (cpp/c++/asc) then a python-tagged block.
-    3. The first two fenced blocks, Ascend C first.
-
-    Args:
-        text: Raw model response.
-
-    Returns:
-        Parsed ``custom_op_asc`` and ``model_new_py`` fields.
+    """Extract the two deliverables from JSON fields or fenced code blocks.
 
     Raises:
-        ValueError: If no usable pair of fenced blocks is found.
+        ValueError: If neither layout carries a usable pair of sources.
     """
+    payload = _json_payload(text)
+    if payload is not None:
+        return payload
     blocks = list(_FENCE_RE.finditer(text))
     if not blocks:
-        raise ValueError("no fenced code blocks found in model response")
+        raise ValueError(
+            "no JSON fields and no fenced code blocks in model response"
+        )
     asc_src, py_src = _pair_fenced_blocks(blocks)
     if asc_src is None or py_src is None:
         raise ValueError(
@@ -340,13 +321,35 @@ def extract_generation(text: str) -> AscendCGeneration:
     return AscendCGeneration(custom_op_asc=asc_src, model_new_py=py_src)
 
 
+def _json_payload(text: str) -> AscendCGeneration | None:
+    """Return the deliverables from a bare JSON body, or None.
+
+    Endpoints without structured-output support answer the structured
+    request with a JSON object instead of fenced blocks.
+    """
+    candidate = text.strip()
+    match = _FENCE_EDGE_RE.match(candidate)
+    if match:
+        candidate = match.group("body").strip()
+    if not candidate.startswith("{"):
+        return None
+    try:
+        data = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    asc_src = data.get("custom_op_asc")
+    py_src = data.get("model_new_py")
+    if not isinstance(asc_src, str) or not isinstance(py_src, str):
+        return None
+    return AscendCGeneration(custom_op_asc=asc_src, model_new_py=py_src)
+
+
 def _pair_fenced_blocks(
     blocks: list[re.Match[str]],
 ) -> tuple[str | None, str | None]:
-    """Pick Ascend C and Python bodies from fenced blocks.
-
-    Filename tags win, then language tags, then first-two-block order.
-    """
+    """Pick Ascend C and Python bodies by filename tag, language, or order."""
     asc_src: str | None = None
     py_src: str | None = None
     for block in blocks:
