@@ -76,7 +76,10 @@ changing CLI flags, result fields, or the evaluation protocol:
    `docs/guide/results.md`, `docs/reference/configuration.md`,
    `docs/reference/cli.md`).
 2. Update `README.md` if the quick start, metrics, or layout changed.
-3. Keep links relative (`evaluation.md`, `../reference/cli.md`) so the
+3. Update [`AGENTS.md`](AGENTS.md) if a command, directory, protocol
+   constant, or invariant it documents changed. It is the agent-facing
+   entry point and is maintained in the same PR as the change.
+4. Keep links relative (`evaluation.md`, `../reference/cli.md`) so the
    pages stay readable on GitHub.
 
 There is no documentation site or Pages workflow.

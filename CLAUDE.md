@@ -1,0 +1,76 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Working agreement
+
+[`AGENTS.md`](AGENTS.md) is the canonical, actively maintained agent contract for
+this repository — architecture, module boundaries, invariants, change recipes, and
+notes about this specific checkout. It is imported below so it loads with this file:
+
+@AGENTS.md
+
+**Maintenance rule.** If a change alters a command, directory, protocol constant, or
+invariant that `AGENTS.md` documents, update `AGENTS.md` in the same change. Keep this
+file to Claude-Code-specific additions only; do not copy the contract here.
+
+## Commands
+
+```bash
+# Setup — works on any machine, no torch and no NPU required
+python -m pip install -e ".[dev]"
+
+# Quality gate; both must pass before a change is done
+pytest -q                                   # 95 passed, 2 skipped (the 2 skip without torch)
+pre-commit run --all-files
+ruff check . && ruff format --check .       # offline fallback: pre-commit cannot fetch hooks here
+
+# Narrower test runs (pytest runs from the checkout root; pyproject sets pythonpath = ["src"])
+pytest -q tests/test_score.py
+pytest -q tests/test_score.py::test_summarize_includes_mean_sol
+pytest -q -k pass_at_k
+
+# Workflow CLIs (from the checkout root)
+python scripts/generate.py --task level1/19_ReLU --model <model> \
+    --hardware ascend910b2 --run-name relu_demo
+ASCEND_RT_VISIBLE_DEVICES=0 python scripts/evaluate.py relu_demo [level]
+python scripts/analyze.py relu_demo          # offline: reads existing JSON, no torch or NPU
+```
+
+Compiling and timing kernels needs an Ascend NPU and the `akb` conda env; under this
+container's default sandbox, device access fails with `aclInit ... 507899` — a sandbox
+artifact, not a broken driver. See "Local host notes" in `AGENTS.md` before diagnosing
+any NPU error. Orchestration, prompt building, lint, unit tests, and offline analysis
+all work with no device.
+
+## Architecture in brief
+
+A model reads a vendored KernelBench task and must emit exactly two files,
+`custom_op.asc` (kernel + host wrapper + `TORCH_LIBRARY` binding) and `model_new.py`
+(the `ModelNew` wrapper). The harness builds them into a **process-local**
+`libcustom_op.so`, loads it with `torch.ops.load_library` in an isolated worker
+process, checks outputs against a live `torch_npu` eager reference, and times
+eligible kernels. Scoring is KernelBench `fast_p` / `pass@k` plus an optional
+roofline SOL score.
+
+```text
+KernelBench task --> prompt.py --> llm.py --> runs/{run}/level{L}/{task}/sample_{i}/
+  --> eval.py static checks (checks/) --> scripts/_eval_worker.py (one process per sample)
+  --> build_template/ CMake --> libcustom_op.so --> eval_device.py
+      (5 seeded correctness trials -> NPU-event timing -> fresh-input re-check)
+  --> per-sample eval_result.json --> eval_results.json --> score.py / analyze.py
+```
+
+The layering is strict and `docs/reference/architecture.md` holds the full table:
+host code calls `eval.evaluate_run`; `eval_device` and `worker_main` are worker-side
+only; `score.py` never loads kernels, tasks, or NPU libraries. `_paths.py` anchors all
+data directories (configs, tasks, build template, `runs/`, `results/`) to the
+repository root, so a wheel install alone is not a working checkout — override with
+`AKB_REPO_ROOT`.
+
+The non-obvious rules that break things when violated (global `custom_opp_*.run`
+installs, a second build path, host-side compute in the wrapper, using
+`results/baseline/` as the evaluation denominator, importing torch at module scope,
+reformatting vendored `KernelBench/`, changing the `fast_0`/`fast_p` denominator
+semantics) are enumerated in the "Invariants" section of `AGENTS.md`. Read it before
+touching `build.py`, `eval_device.py`, `checks/`, or `score.py`.
