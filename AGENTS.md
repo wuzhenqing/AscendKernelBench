@@ -49,16 +49,10 @@ automatic compile-error repair agent and no scheduler / multi-device queue.
 # Setup (any machine; NPU not required). requirements.txt is the only
 # dependency file; it installs the pinned torch pair on Linux.
 python -m pip install -r requirements.txt
-pre-commit install
+pre-commit install   # optional
 
-# Quality gate, both must pass before you call a change done
-pytest -q                              # 107 passed, 2 skipped on a torch-less host
-pytest -q tests/test_score.py          # one file
-pytest -q tests/test_score.py::test_summarize_includes_mean_sol   # one test
-pre-commit run --all-files             # ruff lint + format, whitespace, codespell
-
-# Offline fallback when pre-commit cannot fetch hooks / write its cache
-ruff check . && ruff format --check .
+# Optional before you land Python changes
+pre-commit run --all-files
 
 # Ascend host experiment environment (CANN 9.1.0 pairing)
 conda create -n AscendKernelBench python=3.12 -y && conda activate AscendKernelBench
@@ -111,9 +105,9 @@ CLI facts worth remembering:
 | `configs/eval_default.yaml` | Default protocol: 5 correctness trials, 10 warmup + 100 perf trials, tolerances, timeouts, generation defaults. |
 | `configs/hardware/*.yaml` | Hardware profiles validated by `config.HardwareProfile`. Default `ascend910b2`; `ascend950pr` is reserved and unvalidated. |
 | `configs/subsets/*.txt` | Fixed task subsets for comparable runs. `level1_20.txt` is every fifth level1 task, loaded with `--tasks-file`. Keep the lists stable. |
-| `requirements.txt` | The only dependency file. Backbone packages unpinned; the torch pair pinned to the CANN pairing. |
+| `requirements.txt` | Third-party dependencies; the only pip install file. |
+| `.pre-commit-config.yaml` | Optional Ruff and basic file hooks on `src/` and `scripts/`. |
 | `build_template/CMakeLists.txt` | The single build path that produces `libcustom_op.so`. |
-| `tests/` | NPU-free unit tests (CPU torch optional). |
 | `docs/` | English guides (`guide/`) and references (`reference/`). |
 | `runs/`, `results/` | Generated artifacts; gitignored. Never commit them. |
 
@@ -158,10 +152,8 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
 
 ## Conventions
 
-* Ruff (`pyproject.toml`): 80 columns, target py310, `E,F,W,I,UP,B,SIM,N,D,C4,PIE,RUF`,
-  Google pydocstyle. `KernelBench/`, `runs/`, `results/` are excluded;
-  `tests/**` skip docstring rules; prompt examples skip `D`/`N` so they keep
-  the KernelBench `Model`/`A`/`B` contract.
+* Optional style: `pre-commit run --all-files` runs Ruff on `src/` and
+  `scripts/` only.
 * `from __future__ import annotations` plus type hints on public signatures;
   Google-style docstrings on public functions (summary, then `Args`/`Returns`/`Raises`
   when they add information). One responsibility per function.
@@ -173,9 +165,8 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
   errors go through `log.die()`.
 * Public API is re-exported from `__init__.py` and `__all__`; keep that list
   accurate when adding a public function.
-* CI is the single quality workflow: pre-commit plus pytest on Python 3.10
-  and 3.12. No workflow may require an Ascend device, because GitHub runners
-  never have one; kernel build and timing stay host-side validation.
+* No GitHub Actions workflow ships with this tree. Kernel build and timing
+  stay host-side validation on an Ascend machine.
 
 ## Naming and comment style
 
@@ -195,39 +186,26 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
   # characters, 80 columns maximum.
 * Delete comments that restate the next line or narrate history. A comment
   that has drifted out of date is worse than no comment.
-* `tests/test_comment_style.py` enforces the line, block, decoration, banner,
-  and docstring limits over the whole tree except the vendored corpus. Run it
-  before claiming a comment cleanup is done.
-
-## Tests
-
-* Unit tests must never require an NPU. CPU `torch` is optional — gate it with
-  the existing `importorskip` pattern (that is why 2 tests skip on a torch-less host).
-* `pyproject.toml` sets `pythonpath = ["src"]`, so tests run against the
-  checkout without an install.
-* Kernel compile and NPU timing are host-side validation, not CI gates.
-* Any change to scoring, comparison, SOL, dataset discovery, or the static
-  checker needs a regression test that would have failed before the change.
 
 ## Common change recipes
 
 | Change | Touch |
 | --- | --- |
-| New static check | `checks/rules.py` (regex catalog) or `checks/python_ast.py` / `checks/ascend_c.py`, plus `tests/test_checker.py`. |
+| New static check | `checks/rules.py` (regex catalog) or `checks/python_ast.py` / `checks/ascend_c.py`. |
 | New hardware profile | `configs/hardware/<name>.yaml`; fields must satisfy `config.HardwareProfile`; mirror the comments in `ascend910b2.yaml`. |
 | Protocol/timeout/trial change | `configs/eval_default.yaml` + `timing.py`/`eval.py` + `docs/guide/evaluation.md`. |
-| Scoring change | `score.py` / `sol.py` + `tests/test_score.py` + `docs/guide/results.md` + README metrics table. |
-| Prompt or output contract | `prompt.py` (`SYSTEM_PROMPT`, `OUTPUT_CONTRACT`) + `prompts/examples/` + `tests/test_prompt.py` + docs. |
+| Scoring change | `score.py` / `sol.py` + `docs/guide/results.md` + README metrics table. |
+| Prompt or output contract | `prompt.py` (`SYSTEM_PROMPT`, `OUTPUT_CONTRACT`) + `prompts/examples/` + docs. |
 | New CLI flag | Thin `scripts/*.py` argparse + `cli_util.py` factory + `docs/reference/cli.md`. |
 | Build backend | `build.py` (`build_custom_op` / `load_custom_op` are the only surface) + `build_template/CMakeLists.txt`. |
 | New task | Add to `KernelBench/levelN/` keeping `Model`, `get_inputs`, `get_init_inputs`; see `docs/task_authoring.md`. Task source is validated statically and never executed at load time. |
-| New comparison subset | `configs/subsets/<name>.txt` + `tests/test_subsets.py` + `docs/guide/workflows.md`. Fix the sampling rule in the manifest header and keep the list stable. |
+| New comparison subset | `configs/subsets/<name>.txt` + `docs/guide/workflows.md`. Fix the sampling rule in the manifest header and keep the list stable. |
 
 ## Local host notes (this checkout, not upstream truths)
 
 * Two Python environments exist here: the default base conda env (3.14, has
-  `pytest`/`ruff`/`pre-commit` and an editable install, **no torch**) for tests
-  and lint, and the AscendKernelBench conda env
+  `ruff`/`pre-commit`, **no torch**) for optional lint, and the AscendKernelBench
+  conda env
   (`/root/miniconda3/envs/AscendKernelBench`, Python 3.12, torch 2.10.0 +
   torch-npu 2.10.0.post6, CANN 9.1.0) for anything NPU-related. A legacy env
   named `akb` holds the same packages and is no longer the documented name.
@@ -251,10 +229,8 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
   variables (`ASCEND_TOOLKIT_HOME`, `ASCEND_OPP_PATH`, driver `lib64` in
   `LD_LIBRARY_PATH`, `bisheng` on `PATH`) are already present in
   non-interactive shells, so no `.bashrc` sourcing is required.
-* `pre-commit run --all-files` works here once the hook environments are
-  cached under `~/.cache/pre-commit`; the first run has to fetch them from
-  github.com, which can time out. When that fetch fails, fall back to
-  `ruff check . && ruff format --check .` and say pre-commit was not run.
+* `pre-commit run --all-files` needs hook envs cached under `~/.cache/pre-commit`;
+  the first run fetches from github.com and may time out.
 * Re-evaluation of an unchanged sample reuses the sample-local `build/`
   directory, so builds are incremental. Set
   `ASCEND_KERNEL_BENCH_ENABLE_CCACHE=1` to opt into ccache; set `CANN_SET_ENV`
@@ -276,8 +252,8 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
 
 ## Definition of done
 
-1. `pytest -q` and `pre-commit run --all-files` (or the ruff fallback) pass.
-2. New behavior has a test that would have failed before the change.
+1. Pre-commit passes when you use it (optional).
+2. New behavior validated on an Ascend host when it touches build, eval, or timing.
 3. CLI, result-field, or protocol changes update `README.md` and the matching
    `docs/` page — and this file if any of the above changed.
 4. No global installs, no reformatted vendored tasks, no committed

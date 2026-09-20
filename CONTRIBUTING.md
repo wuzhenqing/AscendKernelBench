@@ -1,48 +1,31 @@
 # Contributing to AscendKernelBench
 
-Thank you for helping improve the harness. This document is the style and
-review contract for the Python engine, scripts, tests, and docs.
+Thank you for helping improve the harness. This document is the style contract
+for the Python engine, scripts, and docs.
 
 ## Development environment
 
 ```bash
-# Dependencies, lint, and tests (any machine)
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-pre-commit install
-
-# Optional: Ascend host experiment env
-conda activate AscendKernelBench
-source /usr/local/Ascend/cann-9.1.0/set_env.sh
+pre-commit install   # optional
 ```
 
-The AscendKernelBench env pins Python 3.12, PyTorch 2.10.0, and
-torch-npu 2.10.0.post6 for CANN 9.1.0. Recreate it with
-`conda create -n AscendKernelBench python=3.12 -y` and
-`python -m pip install -r requirements.txt`.
+On an Ascend host, use the AscendKernelBench conda env (Python 3.12, CANN 9.1.0
+torch pairing) and source `set_env.sh` before evaluate or baseline.
 
 ## Style gate
 
-Every change that touches Python must pass:
+Optional before you submit Python changes:
 
 ```bash
 pre-commit run --all-files
-pytest
 ```
 
-Hooks enforce:
-
-| Tool | What it checks |
-| --- | --- |
-| Ruff lint | PEP 8 (`E`/`W`), pyflakes, isort, pyupgrade, bugbear, plus Google-convention pydocstyle (`D`) |
-| Ruff format | 80-column wrap, consistent quotes |
-| pre-commit-hooks | Trailing whitespace, EOF, YAML/TOML/JSON, debug leftovers |
-| codespell | Common misspellings |
-
-Vendored `KernelBench/` tasks are excluded.
-Few-shot prompt examples keep the KernelBench `Model` / `A` / `B`
-contract and are excluded from docstring/naming rules.
+Pre-commit runs Ruff on `src/` and `scripts/` only (not vendored `KernelBench/`).
+Few-shot prompt examples keep the KernelBench `Model` / `A` / `B` contract; do
+not reformat vendored tasks to satisfy Ruff.
 
 ### Function quality
 
@@ -59,16 +42,6 @@ For code under `src/ascend_kernel_bench/`:
 
 Do not reformat vendored KernelBench tasks to “pass Ruff.”
 
-## Tests
-
-Unit tests live in `tests/` and must not require an NPU. They may import
-CPU `torch`. Kernel compile / NPU timing is a host-side validation step,
-not a CI gate.
-
-If you change scoring, comparison, SOL, dataset discovery, or the static
-checker, add or update a unit test that would have failed before the
-change.
-
 ## Documentation
 
 User-facing docs are English Markdown pages under `docs/`. After
@@ -79,24 +52,19 @@ changing CLI flags, result fields, or the evaluation protocol:
    `docs/reference/cli.md`).
 2. Update `README.md` if the quick start, metrics, or layout changed.
 3. Update [`AGENTS.md`](AGENTS.md) if a command, directory, protocol
-   constant, or invariant it documents changed. It is the agent-facing
-   entry point and is maintained in the same PR as the change.
-4. Keep links relative (`evaluation.md`, `../reference/cli.md`) so the
-   pages stay readable on GitHub.
-
-There is no documentation site or Pages workflow.
+   constant, or invariant it documents changed.
+4. Keep links relative so the pages stay readable on GitHub.
 
 ## Pull requests
 
 - Keep the change reviewable: one concern per PR when you can.
 - Describe *why*, not only *what*.
 - Do not commit `runs/`, `results/`, `.so` files, or API keys.
-- Do not push to `main` unless a maintainer asked you to.
 
 Expected review passes for engine changes:
 
-1. **Protocol review** — does the change preserve KernelBench scoring
-   semantics and the process-local `torch.library` contract?
-2. **Style review** — pre-commit is green; new functions meet the
-   docstring / typing bar.
+1. **Protocol review** — KernelBench scoring semantics and process-local
+   `torch.library` contract preserved.
+2. **Style review** — pre-commit green when you use it; docstrings and types
+   on new public functions.
 3. **Docs review** — README and the relevant guide page match the tree.

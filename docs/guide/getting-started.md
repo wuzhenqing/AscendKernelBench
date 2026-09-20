@@ -31,12 +31,10 @@ Run the commands in these guides from the repository root, with the environment 
 
 `requirements.txt` is the only dependency file. On Linux it also installs the pinned PyTorch and `torch_npu` pair. It never installs CANN, the NPU driver, or the native build toolchain.
 
-For linting and unit tests, install the pre-commit hooks:
+Optional local checks after you change Python:
 
 ```bash
-pre-commit install
-pre-commit run --all-files
-pytest
+pre-commit install && pre-commit run --all-files
 ```
 
 ### Ascend host experiment environment

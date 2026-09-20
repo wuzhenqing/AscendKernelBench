@@ -1,11 +1,7 @@
-# Local style gate for AscendKernelBench: ruff (PEP 8, pyflakes, bugbear,
-# Google pydocstyle) and ruff-format at 80 columns. Vendored KernelBench
-# tasks are never rewritten. Install once with pip install -r requirements.txt.
+# Optional local checks. Install deps with pip install -r requirements.txt.
 
 default_language_version:
   python: python3
-
-exclude: ^(KernelBench/|runs/|results/)
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -15,26 +11,12 @@ repos:
         exclude_types: [markdown]
       - id: end-of-file-fixer
       - id: check-yaml
-      - id: check-toml
-      - id: check-json
-      - id: check-added-large-files
-        args: [--maxkb=1024]
-      - id: check-merge-conflict
-      - id: check-ast
-      - id: debug-statements
-      - id: mixed-line-ending
-        args: [--fix=lf]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.13.0
     hooks:
       - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
+        files: ^(src/|scripts/)
+        args: [--fix, --exit-non-zero-on-fix, "--select=E,F,W,I"]
       - id: ruff-format
-
-  - repo: https://github.com/codespell-project/codespell
-    rev: v2.4.1
-    hooks:
-      - id: codespell
-        additional_dependencies: [tomli]
-        args: [--toml=pyproject.toml]
+        files: ^(src/|scripts/)

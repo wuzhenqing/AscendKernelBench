@@ -1,7 +1,7 @@
 """Process-wide logging via loguru, with optional Rich tracebacks.
 
 setup_logging is idempotent per process and is never called on import,
-so pytest and embedding code keep their own logging setup.
+so callers and embedding code keep their own logging setup.
 """
 
 from __future__ import annotations

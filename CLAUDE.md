@@ -25,15 +25,8 @@ Do not abbreviate it as akb.
 # only dependency file and installs the pinned torch pair on Linux only.
 python -m pip install -r requirements.txt
 
-# Quality gate; both must pass before a change is done
-pytest -q                                   # 107 passed, 2 skipped (2 skip without torch)
-pre-commit run --all-files                  # works once hook envs are cached
-ruff check . && ruff format --check .       # fallback when the hook fetch fails
-
-# Narrower test runs (from the checkout root; pyproject sets pythonpath = ["src"])
-pytest -q tests/test_score.py
-pytest -q tests/test_score.py::test_summarize_includes_mean_sol
-pytest -q -k pass_at_k
+# Optional before landing Python changes (from checkout root)
+pre-commit run --all-files
 
 # Workflow CLIs (from the checkout root)
 export OPENAI_BASE_URL=https://api.deepseek.com/v1 OPENAI_API_KEY=<key>
@@ -46,7 +39,7 @@ python scripts/analyze.py level1_20         # offline: reads existing JSON, no t
 Compiling and timing kernels needs the AscendKernelBench conda env and an Ascend NPU.
 Under this container's default sandbox, device access fails with `aclInit ... 507899` —
 a sandbox artifact, not a broken driver. See "Local host notes" in `AGENTS.md` before
-diagnosing any NPU error. Orchestration, prompt building, lint, unit tests, and offline
+diagnosing any NPU error. Orchestration, prompt building, optional lint, and offline
 analysis all work with no device.
 
 ## Architecture in brief

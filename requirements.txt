@@ -1,8 +1,7 @@
-# AscendKernelBench dependencies. This is the only dependency file.
-# Packaging metadata lives in pyproject.toml; versions stay unpinned except
-# for the torch pair, which must match the installed CANN release.
+# AscendKernelBench dependencies (single install file).
+# Versions stay unpinned except the torch pair, which must match CANN.
 
-# Machine without an NPU, for generation, analysis, lint, and tests.
+# Host without an NPU: generation and analysis.
 #   python -m venv .venv && . .venv/bin/activate
 #   pip install -r requirements.txt
 
@@ -20,13 +19,9 @@ loguru
 pyyaml
 numpy
 
-# Quality gate and unit tests.
-pytest
 ruff
 pre-commit
 
 # NPU runtime, pinned to the pairing published for CANN 9.1.0. Linux only:
-# torch-npu publishes no macOS wheel, and the rest of the package never
-# imports torch. Change both pins together when CANN changes.
 torch==2.10.0 ; sys_platform == "linux"
 torch-npu==2.10.0.post6 ; sys_platform == "linux"

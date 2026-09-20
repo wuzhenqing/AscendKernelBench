@@ -27,10 +27,8 @@
 \======================================================================/
 ```
 
-[![Quality](https://github.com/wuzhenqing/AscendKernelBench/actions/workflows/quality.yml/badge.svg)](https://github.com/wuzhenqing/AscendKernelBench/actions/workflows/quality.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 A reproducible benchmark for **LLM-generated Ascend C kernels** on Huawei
 Ascend NPUs. A language model reads a PyTorch reference `Model` and writes
@@ -76,7 +74,7 @@ not implement an automatic compile-error repair agent.
 | --- | --- | --- |
 | Read tasks and build prompts | Yes | Yes |
 | Generate candidates with a remote LLM | Yes | Yes |
-| Lint and unit-test | Yes | Yes |
+| Lint (optional) | Yes | Yes |
 | Analyze saved `eval_results.json` | Yes | Yes |
 | Compile, check, or time a kernel | No | Required |
 
@@ -96,7 +94,7 @@ Ascend host the recommended experiment environment is the conda env
 git clone https://github.com/wuzhenqing/AscendKernelBench.git
 cd AscendKernelBench
 
-# Host without an NPU: generation, analysis, lint, and unit tests
+# Host without an NPU: generation, analysis, and optional lint
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -196,22 +194,19 @@ scripts/                     Five benchmark CLIs
 configs/                     Eval defaults, hardware profiles, task subsets
 build_template/              CMake project that writes libcustom_op.so
 docs/                        English Markdown guides and references
-.github/workflows/           Lint and unit-test quality gate
-requirements.txt             Backbone dependencies for every machine
+requirements.txt             Third-party dependencies for every machine
 ```
 
 ## Development
 
+Optional when you change Python under `src/` or `scripts/`:
+
 ```bash
 python -m pip install -r requirements.txt
-pre-commit install
-pre-commit run --all-files
-pytest
+pre-commit install && pre-commit run --all-files
 ```
 
-Style is enforced by pre-commit: Ruff (PEP 8 + Google pydocstyle),
-ruff-format (80 columns), and the standard hook set. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Acknowledgments and license
 
