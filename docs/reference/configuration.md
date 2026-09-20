@@ -135,6 +135,8 @@ Pass a custom profile with `--hardware configs/hardware/my-device.yaml`, or save
 | `CANN_SET_ENV` | Path to the environment script used by the build helper. Defaults to `/usr/local/Ascend/cann-9.1.0/set_env.sh`. |
 | `ASCEND_KERNEL_BENCH_REPO_ROOT` | Override the root used for configs, tasks, build templates, results, and runs. Set it before starting Python. |
 | `ASCEND_KERNEL_BENCH_ENABLE_CCACHE` | When set to `1` / `true` / `yes` / `on`, the ACLNN CMake configure step receives `-DENABLE_CCACHE=ON`. |
+| `ASCEND_KERNEL_BENCH_CACHE_DIR` | Override the cache root holding the shared host-TU precompiled header. Defaults to `$XDG_CACHE_HOME/ascend-kernel-bench` or `~/.cache/ascend-kernel-bench`. |
+| `ASCEND_KERNEL_BENCH_DISABLE_PCH` | When set to `1` / `true` / `yes` / `on`, the split build compiles the host glue without the precompiled header. |
 | `ASCEND_SLOG_PRINT_TO_STDOUT` | The build/evaluation code defaults this to `0` in child environments when it is unset, to reduce runtime log output. |
 | `ASCEND_RT_VISIBLE_DEVICES` | Restrict which physical NPUs the process can see. Evaluation always addresses `npu:0` inside that visible set. |
 

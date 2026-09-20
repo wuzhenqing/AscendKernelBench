@@ -6,13 +6,20 @@ stages live on SampleEvaluator so shared trial state is explicit.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from .build import BuildError, LoadError, build_custom_op, load_custom_op
+from .build import (
+    BuildError,
+    LoadError,
+    build_custom_op,
+    load_custom_op,
+    split_asc_source,
+)
 from .compare import (
     compare_candidate_outputs,
     inputs_were_mutated,
@@ -139,14 +146,14 @@ class SampleEvaluator:
             return failed
         failed = self._load_python_modules()
         if failed is not None:
-            return failed
+            return self._with_build_facts(failed)
         self._prepare_device()
         failed = self._construct_models()
         if failed is not None:
-            return failed
+            return self._with_build_facts(failed)
         failed = self._run_correctness_trials()
         if failed is not None:
-            return failed
+            return self._with_build_facts(failed)
         self._fill_metadata()
         if self.pass_count != self.req.num_correct_trials:
             self.metadata["correctness_error"] = self.correctness_error
@@ -156,6 +163,15 @@ class SampleEvaluator:
             if self._post_timing_recheck() is not None:
                 return self._compiled(correctness=False)
         return self._compiled(correctness=True)
+
+    def _with_build_facts(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Merge the recorded build facts into a failure payload."""
+        metadata = result.get("metadata")
+        if isinstance(metadata, dict):
+            for key in ("build_mode", "build_seconds"):
+                if key in self.metadata:
+                    metadata.setdefault(key, self.metadata[key])
+        return result
 
     def _compiled(self, *, correctness: bool) -> dict[str, Any]:
         """Return a post-build payload from the fields collected so far."""
@@ -173,6 +189,10 @@ class SampleEvaluator:
         asc_source = (self.sample_path / "custom_op.asc").read_text(
             encoding="utf-8"
         )
+        self.metadata["build_mode"] = (
+            "split" if split_asc_source(asc_source) is not None else "legacy"
+        )
+        started = time.monotonic()
         try:
             self.so_path = build_custom_op(
                 asc_source,
@@ -187,6 +207,10 @@ class SampleEvaluator:
             return fail_result(
                 compiled=True,
                 runtime_error=f"shared library load failed: {exc}",
+            )
+        finally:
+            self.metadata["build_seconds"] = round(
+                time.monotonic() - started, 3
             )
         return None
 
@@ -347,6 +371,8 @@ class SampleEvaluator:
     def _fill_metadata(self) -> None:
         """Record protocol, reference mode, and runtime-stack facts."""
         self.metadata = {
+            # Preserve the build facts recorded by _build_and_load.
+            **self.metadata,
             **eval_protocol_metadata(
                 hardware_name=self.req.hardware_name,
                 precision=self.req.precision,

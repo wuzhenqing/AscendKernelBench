@@ -5,7 +5,12 @@ from __future__ import annotations
 import re
 
 from .rules import PatternRule, run_rules
-from .text import dedupe, strip_cpp_comments
+from .text import (
+    HOST_SECTION_MARKER,
+    HOST_SECTION_MARKER_RE,
+    dedupe,
+    strip_cpp_comments,
+)
 
 _ASC_KERNEL_MARKERS = ("__global__", "__vector__")
 
@@ -144,11 +149,81 @@ def _check_asc_binding(code: str) -> list[str]:
             "custom_op.asc missing TORCH_LIBRARY_IMPL(...): bind the NPU "
             "implementation (PrivateUse1) for torch.ops.custom_op"
         )
+    return violations
+
+
+def _check_pybind_ban(code: str) -> list[str]:
+    """Ban pybind11 in either layout; registration is torch.library only."""
     if "PYBIND11_MODULE" in code or "#include <pybind11/" in code:
-        violations.append(
+        return [
             "pybind11 is not used; register with TORCH_LIBRARY / "
             "TORCH_LIBRARY_IMPL and let the evaluator call "
             "torch.ops.load_library"
+        ]
+    return []
+
+
+def _check_split_layout(source: str) -> list[str]:
+    """Validate the two-section layout of a new-style split source."""
+    lines = source.splitlines()
+    markers = [
+        i for i, line in enumerate(lines) if HOST_SECTION_MARKER_RE.match(line)
+    ]
+    if len(markers) != 1:
+        return [
+            f"custom_op.asc must carry exactly one comment line containing "
+            f"{HOST_SECTION_MARKER!r} separating device and host sections "
+            f"({len(markers)} found)"
+        ]
+    device = strip_cpp_comments("\n".join(lines[: markers[0]]))
+    host = strip_cpp_comments("\n".join(lines[markers[0] + 1 :]))
+
+    violations: list[str] = []
+    for marker in _ASC_KERNEL_MARKERS:
+        if marker not in device:
+            violations.append(
+                f"device section missing {marker!r}: kernels belong above "
+                f"the {HOST_SECTION_MARKER} line"
+            )
+    if re.search(r"#\s*include\s*[<\"](?:torch|ATen)/", device) or re.search(
+        r"#\s*include\s*[<\"]torch_npu/", device
+    ):
+        violations.append(
+            "device section must not include torch headers; the fast build "
+            "compiles it without them (torch includes belong in the host "
+            "section)"
+        )
+    for marker in _ASC_KERNEL_MARKERS:
+        if marker in host:
+            violations.append(
+                f"host section contains {marker!r}: kernel definitions "
+                f"belong above the {HOST_SECTION_MARKER} line"
+            )
+            break
+    if not re.search(r"\bTORCH_LIBRARY\s*\(", host):
+        violations.append(
+            "host section missing TORCH_LIBRARY(...): register the operator "
+            "schema so the evaluator can torch.ops.load_library the "
+            "process-local .so"
+        )
+    if not re.search(r"\bTORCH_LIBRARY_IMPL\s*\(", host):
+        violations.append(
+            "host section missing TORCH_LIBRARY_IMPL(...): bind the NPU "
+            "implementation (PrivateUse1) for torch.ops.custom_op"
+        )
+    kernels = {
+        match.group(1)
+        for match in re.finditer(
+            r"__global__\s+__vector__\s+void\s+(\w+)\s*\(", device
+        )
+    }
+    calls = {
+        match.group(1) for match in re.finditer(r"\b(\w+)_launch\s*\(", host)
+    }
+    for name in sorted(calls - kernels):
+        violations.append(
+            f"host section calls {name}_launch(...) but no __global__ "
+            f"__vector__ kernel named {name} exists in the device section"
         )
     return violations
 
@@ -204,7 +279,11 @@ def check_custom_op_asc(source: str) -> list[str]:
     """
     code = strip_cpp_comments(source)
     violations: list[str] = []
-    violations.extend(_check_asc_binding(code))
+    if HOST_SECTION_MARKER_RE.search(source):
+        violations.extend(_check_split_layout(source))
+    else:
+        violations.extend(_check_asc_binding(code))
+    violations.extend(_check_pybind_ban(code))
     violations.extend(_check_asc_aten(code))
     violations.extend(_check_asc_methods(code))
     violations.extend(run_rules(code, ASC_BANNED_RULES))

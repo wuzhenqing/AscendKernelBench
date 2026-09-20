@@ -71,6 +71,7 @@ def test_validate_accepts_torch_library() -> None:
     gen = AscendCGeneration(
         custom_op_asc=(
             "__global__ __vector__ void k() {}\n"
+            "// ==================== ASCEND_HOST_SECTION ====================\n"
             "TORCH_LIBRARY(custom_op, m) {}\n"
             "TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, m) {}"
         ),
@@ -81,6 +82,23 @@ def test_validate_accepts_torch_library() -> None:
         ),
     )
     assert validate_generation(gen) == []
+
+
+def test_validate_rejects_missing_host_section_marker() -> None:
+    gen = AscendCGeneration(
+        custom_op_asc=(
+            "__global__ __vector__ void k() {}\n"
+            "TORCH_LIBRARY(custom_op, m) {}\n"
+            "TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, m) {}"
+        ),
+        model_new_py=(
+            "class ModelNew:\n"
+            "    def forward(self, x):\n"
+            "        return torch.ops.custom_op.run(x)"
+        ),
+    )
+    problems = validate_generation(gen)
+    assert any("ASCEND_HOST_SECTION" in item for item in problems)
 
 
 def test_validate_rejects_host_only() -> None:

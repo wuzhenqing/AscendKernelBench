@@ -27,10 +27,18 @@ KernelBench task + hardware profile
   -> eval.py static checks (checker.py / checks/)
   -> isolated worker (scripts/_eval_worker.py)
   -> build.py + build_template/ -> libcustom_op.so -> torch.ops.load_library
+       (marked sources: split kernel/launcher/host units + shared host PCH)
   -> eval_device.py: seeded correctness -> NPU-event timing -> fresh-input re-check
   -> per-sample eval_result.json
   -> eval_results.json + pass_at_k_results.json -> score.py / scripts/analyze.py
 ```
+
+`custom_op.asc` has two sections separated by one
+`// ==================== ASCEND_HOST_SECTION ====================` line:
+device kernels above (compiled without torch headers), torch glue below
+(compiled as plain C++ against the shared PCH). The host wrapper launches
+kernels through generated `<kernel>_launch(numBlocks, stream, args...)`
+stubs. Unmarked legacy sources still build as a single ASC unit.
 
 Current scope: generation and evaluation CLIs only. There is **no**
 automatic compile-error repair agent and no scheduler / multi-device queue.
@@ -251,9 +259,13 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
   directory, so builds are incremental. Set
   `ASCEND_KERNEL_BENCH_ENABLE_CCACHE=1` to opt into ccache; set `CANN_SET_ENV`
   to point at a different `set_env.sh`.
-* Cold evaluation costs about 140 s per sample, of which 121 s is the ASC
-  front-end parsing `torch/extension.h` in the sample translation unit. The
-  breakdown and the options are in
+* Cold evaluation of a new-style (split-layout) sample costs about 35-45 s:
+  ~9 s worker startup, ~15-20 s build (3 s configure + parallel kernel /
+  launcher / PCH'd host compiles + link), the rest correctness and timing.
+  The host-TU PCH lives in `~/.cache/ascend-kernel-bench/pch/` (override with
+  `ASCEND_KERNEL_BENCH_CACHE_DIR`); the first build in an environment emits
+  it in ~20 s. Legacy single-TU samples still build in 60-120 s. The
+  breakdown and the rejected alternatives are in
   `docs/guide/troubleshooting.md`; the measured numbers are for this host, so
   re-measure before quoting them elsewhere.
 * The DeepSeek endpoint used for the reference run is

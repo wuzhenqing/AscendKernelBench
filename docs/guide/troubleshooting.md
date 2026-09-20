@@ -109,33 +109,50 @@ Read the matching build log and confirm that the selected hardware profile match
 
 `Built shared library not found` means the build command returned successfully but `libcustom_op.so` was not found in the sample directory. Check the output location and preserve the build log for investigation.
 
-### Each sample takes about two minutes to build
+### Build times: split layout versus legacy layout
 
-Expected, not a fault. Measured on an Ascend 910B2 with CANN 9.1.0 for a
-120-line elementwise kernel: 9 s of worker startup, 11 s of CMake configure, and
-121 s of ASC compilation. Re-evaluating an unchanged sample reuses its build
+New-style samples (with the `ASCEND_HOST_SECTION` marker) build in about
+15-20 s on an Ascend 910B2 with CANN 9.1.0: roughly 3 s of CMake configure,
+7 s for the device kernels, 1 s for the generated launch stubs, 4 s for the
+torch host glue, and 2 s for the link, with the three translation units
+compiled in parallel. Re-evaluating an unchanged sample reuses its build
 directory and takes under a second.
 
-The compile is dominated by `torch/extension.h`, which expands to roughly 5000
-header files, and the ASC front-end parses that set for every sample. The same
-kernel without torch headers compiles in 8 s. This is the normal cost of a
-PyTorch C++ extension rather than an Ascend-specific problem: cold
-`torch/extension.h` builds are reported at 60-120 s on CUDA as well, while
-plain nvcc kernels that avoid torch headers are the 10-20 s case.
+The speedup comes from keeping torch headers out of the ASC front-end. A
+single-unit `.asc` is parsed three times by `bisheng` (cube and vector device
+passes plus the host pass), and `torch/extension.h` alone expands to roughly
+5000 headers — about 110 s of parsing per sample. The split layout compiles
+the device sections without torch headers, and compiles the host glue as
+plain C++ against a shared precompiled header that covers
+`torch/library.h`, `ATen/ATen.h`, and the `torch_npu` stream header.
 
-Options and their price:
+The precompiled header lives in a per-environment cache keyed by compiler,
+torch, torch_npu, and Python versions plus the exact flag set
+(`ASCEND_KERNEL_BENCH_CACHE_DIR` overrides the location; the default follows
+`XDG_CACHE_HOME`, i.e. `~/.cache/ascend-kernel-bench/pch/`). First use emits
+it in about 20 s; every later sample reuses it. If emission or consumption
+fails, the build falls back to a plain C++ host compile automatically.
+`ASCEND_KERNEL_BENCH_DISABLE_PCH=1` forces the fallback.
 
-- Narrowing the includes in the bundled examples to `ATen/ATen.h` plus
-  `torch/library.h` measures 66 s instead of 121 s, but changes what the
-  few-shot examples demonstrate.
-- Precompiled headers would remove most of the parse cost; the CANN 9.1
-  `bisheng` driver does not emit one for the `--asc-aicore-lang` mode that
-  Ascend C compilation needs.
+Legacy samples without the marker still build as one ASC translation unit
+(about 60-120 s depending on page-cache warmth), so older runs remain
+re-evaluable. Regenerating a task with the current prompt produces the
+split layout.
+
+Notes on alternatives that were measured and rejected:
+
+- A pybind11 registration TU (as in the Ascend devkit `00_pytorch/pybind`
+  example) still includes `torch/extension.h` and measures the same ~120 s
+  compile; the registration mechanism is not the cost driver.
+- A precompiled header for the whole single-unit `.asc` is impossible: the
+  three front-end passes target two different triples
+  (`hiipu64-hisilicon-cce` and `aarch64-unknown-linux-gnu`), and one PCH
+  cannot serve both.
 - `ASCEND_KERNEL_BENCH_ENABLE_CCACHE=1` speeds up re-evaluation of unchanged
   samples only, because new sources cannot hit an existing cache entry.
 
 Builds run inside each sample's own worker process, so samples cannot share a
-compilation or configure step.
+compilation or configure step; the PCH cache is the shared artifact.
 
 ### `module load failed` or `candidate model init failed`
 

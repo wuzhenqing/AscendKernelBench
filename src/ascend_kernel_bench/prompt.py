@@ -33,16 +33,33 @@ CMakeLists.txt, build.sh, op_host / op_kernel trees, framework plugins,
 custom_opp packages, or any install / pip / OPP deployment step. Output
 exactly two fenced code blocks, tagged with their filenames:
 
-1. ```custom_op.asc — one self-contained Ascend C source file with four parts:
-   a. kernel class: `Init` (data partition across cores, GM buffers) and
-      `Process` (UB allocation, copy-in, compute, copy-out);
-   b. the kernel function annotated `__global__ __vector__`, calling
+1. ```custom_op.asc — one Ascend C source file in TWO sections, separated by
+   exactly one marker line (copy it verbatim):
+
+   // ==================== ASCEND_HOST_SECTION ====================
+
+   DEVICE SECTION (above the marker) — compiled without torch headers:
+   a. `#include "kernel_operator.h"`, then the kernel class: `Init` (data
+      partition across cores, GM buffers) and `Process` (UB allocation,
+      copy-in, compute, copy-out);
+   b. kernel functions annotated `__global__ __vector__`, calling
       `AscendC::InitSocState()`, `Init`, `Process`,
-      `AscendC::PipeBarrier<PIPE_ALL>()`;
-   c. host wrapper taking `const at::Tensor&` arguments, fetching the current
+      `AscendC::PipeBarrier<PIPE_ALL>()`.
+   Never include torch, ATen, or torch_npu headers in the device section.
+
+   HOST SECTION (below the marker) — compiled as plain C++17:
+   c. exactly these includes: `#include <torch/library.h>`,
+      `#include <ATen/ATen.h>`, and
+      `#include "torch_npu/csrc/core/npu/NPUStream.h"`;
+   d. host wrapper taking `const at::Tensor&` arguments, fetching the current
       NPU stream via `c10_npu::getCurrentNPUStream().stream(false)`,
-      allocating outputs, launching with `<<<numBlocks, 0, stream>>>`;
-   d. a process-local torch.library binding. Register the host function with
+      allocating outputs, and launching each kernel through its generated
+      stub: for a kernel `foo(...)` call
+      `foo_launch(numBlocks, (void*)aclStream, <kernel args in order>)`.
+      The build auto-generates `foo_launch` from your kernel signature, so
+      never declare or define it yourself. Kernel pointer parameters
+      (`__gm__ T*`) become plain `T*` at the call site;
+   e. a process-local torch.library binding. Register the host function with
       `TORCH_LIBRARY(custom_op, m)` and bind the NPU implementation with
       `TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, m)`. Do NOT use
       `PYBIND11_MODULE` or any pybind11 header. The evaluator will

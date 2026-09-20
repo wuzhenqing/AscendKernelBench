@@ -11,6 +11,14 @@ import io
 import re
 import tokenize
 
+# Separator between the device and host sections of a split custom_op.asc.
+# Only a standalone comment line counts, so prose mentions of the marker do
+# not split a file.
+HOST_SECTION_MARKER = "ASCEND_HOST_SECTION"
+HOST_SECTION_MARKER_RE = re.compile(
+    r"^\s*//[\s=]*" + HOST_SECTION_MARKER + r"[\s=]*$", re.MULTILINE
+)
+
 
 def mask_string_constants(source: str) -> str:
     """Blank string constants so embedded text cannot trip regex rules.

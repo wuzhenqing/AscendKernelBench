@@ -36,6 +36,11 @@ api_style: |
 
   Pipeline safety (mandatory):
   - Prefer separate UB buffers for inputs and outputs, as in the example.
+  - The copy-out (MTE3 pipe) must wait for the compute (V pipe) that produced
+    the data: after the compute call insert
+    `AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0)` and put
+    `AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0)` immediately
+    before the copy-out, otherwise the copy-out races the compute.
   - If one UB buffer is reused across loop iterations by both copy-in (MTE2) and
     copy-out (MTE3) — e.g. single-buffer in-place compute — you MUST insert
     `AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID0)` after the copy-out

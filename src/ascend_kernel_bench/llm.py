@@ -15,6 +15,8 @@ from loguru import logger
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .checks.text import HOST_SECTION_MARKER
+
 _FENCE_EDGE_RE = re.compile(
     r"^\s*```[A-Za-z0-9_+.-]*\s*\n(?P<body>.*?)\n?\s*```\s*$", re.DOTALL
 )
@@ -38,9 +40,13 @@ class AscendCGeneration(BaseModel):
 
     custom_op_asc: str = Field(
         description=(
-            "Complete self-contained Ascend C source file custom_op.asc: "
-            "kernel class, __global__ __vector__ kernel, host launch wrapper "
-            "taking at::Tensor, and a process-local torch.library binding "
+            "Complete Ascend C source file custom_op.asc in two sections "
+            "separated by one // ==================== ASCEND_HOST_SECTION "
+            "==================== comment line: the device section holds "
+            "the kernel class and __global__ __vector__ kernels (no torch "
+            "headers); the host section holds the at::Tensor wrapper, which "
+            "launches kernels via the generated <kernel>_launch stubs, and "
+            "a process-local torch.library binding "
             "(TORCH_LIBRARY(custom_op, ...) and "
             "TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, ...)). "
             "Raw file content only, no markdown fences. Do not use pybind11."
@@ -104,6 +110,7 @@ def _usage_dict(response: object) -> dict:
 
 _MIN_ASC_KERNEL_MARKERS = ("__global__", "__vector__")
 _MIN_ASC_BINDING_MARKERS = ("TORCH_LIBRARY", "TORCH_LIBRARY_IMPL")
+_MIN_ASC_LAYOUT_MARKERS = (HOST_SECTION_MARKER,)
 _MIN_PY_MARKERS = ("class ModelNew", "torch.ops.custom_op")
 
 
@@ -120,6 +127,12 @@ def validate_generation(gen: AscendCGeneration) -> list[str]:
     for marker in _MIN_ASC_BINDING_MARKERS:
         if marker not in gen.custom_op_asc:
             problems.append(f"custom_op_asc missing {marker!r}")
+    for marker in _MIN_ASC_LAYOUT_MARKERS:
+        if marker not in gen.custom_op_asc:
+            problems.append(
+                f"custom_op_asc missing the {marker!r} separator comment "
+                "between the device and host sections"
+            )
     if "PYBIND11_MODULE" in gen.custom_op_asc:
         problems.append("custom_op_asc must not use PYBIND11_MODULE")
     for marker in _MIN_PY_MARKERS:

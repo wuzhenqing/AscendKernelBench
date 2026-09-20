@@ -2,6 +2,14 @@
 # process-local libcustom_op.so loaded with torch.ops.load_library. Never an
 # OPP package (no custom_opp_*.run), never a pybind module.
 
+# With -DAKB_SPLIT_BUILD=ON the sample directory instead provides
+# custom_op_kernel.asc (device code), custom_op_launch.asc (generated launch
+# stubs), and custom_op_host.cpp (torch glue).
+
+# The host glue compiles as plain C++ against the shared precompiled header
+# AKB_PCH_PATH, so the torch headers are parsed once per environment instead
+# of once per sample.
+
 # CMAKE_ASC_ARCHITECTURES is injected by build.py from the hardware profile.
 # Requires CANN 9.1.0 or newer, with torch and torch_npu importable.
 
@@ -20,12 +28,17 @@ project(custom_op_build LANGUAGES ASC CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# gnu++17 vs c++17 changes predefined macros, which invalidates the PCH.
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
+
+option(AKB_SPLIT_BUILD "Build from split device/host sources" OFF)
+set(AKB_PCH_PATH "" CACHE FILEPATH "Shared precompiled header for the host TU")
 
 # Optional ccache, enabled with -DENABLE_CCACHE=ON. The ASC launcher matters
 # most: the .asc translation unit dominates build time.
@@ -43,15 +56,17 @@ if(ENABLE_CCACHE)
 endif()
 
 # The ASC/bisheng front-end is LLVM based, so it needs an explicit
-# --gcc-toolchain to resolve C++ standard library headers.
+# --gcc-toolchain to resolve C++ standard library headers. Query plain gcc:
+# in split mode CMAKE_CXX_COMPILER is bisheng itself.
+find_program(AKB_GCC_EXECUTABLE gcc REQUIRED)
 execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libgcc.a
+    COMMAND ${AKB_GCC_EXECUTABLE} -print-file-name=libgcc.a
     OUTPUT_VARIABLE LIBGCC_PATH
     OUTPUT_STRIP_TRAILING_WHITESPACE
     RESULT_VARIABLE GCC_QUERY_RESULT
 )
 if(NOT GCC_QUERY_RESULT EQUAL 0 OR NOT EXISTS "${LIBGCC_PATH}")
-    message(FATAL_ERROR "Failed to locate libgcc.a using ${CMAKE_CXX_COMPILER}")
+    message(FATAL_ERROR "Failed to locate libgcc.a using ${AKB_GCC_EXECUTABLE}")
 endif()
 get_filename_component(LIBGCC_PATH "${LIBGCC_PATH}" REALPATH)
 string(REGEX REPLACE "/lib/gcc/.*$" "" GCC_TOOLCHAIN_ROOT "${LIBGCC_PATH}")
@@ -62,26 +77,55 @@ message(STATUS "GCC toolchain root: ${GCC_TOOLCHAIN_ROOT}")
 
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
-execute_process(
-    COMMAND ${CMAKE_COMMAND} -E env ASCEND_SLOG_PRINT_TO_STDOUT=0
-            ${Python3_EXECUTABLE} -c "import os, torch, torch_npu; print(torch.utils.cmake_prefix_path); print(os.path.dirname(torch_npu.__file__))"
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    OUTPUT_VARIABLE TORCH_DISCOVERY
-    RESULT_VARIABLE TORCH_DISCOVERY_RESULT
-)
-if(NOT TORCH_DISCOVERY_RESULT EQUAL 0)
-    message(FATAL_ERROR "torch / torch_npu discovery failed in ${Python3_EXECUTABLE}")
+# build.py passes TORCH_CMAKE_PREFIX_PATH and TORCH_NPU_PATH from the
+# worker's own torch import, skipping two Python discovery subprocesses.
+if(NOT DEFINED TORCH_CMAKE_PREFIX_PATH OR NOT DEFINED TORCH_NPU_PATH)
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E env ASCEND_SLOG_PRINT_TO_STDOUT=0
+                ${Python3_EXECUTABLE} -c "import os, torch, torch_npu; print(torch.utils.cmake_prefix_path); print(os.path.dirname(torch_npu.__file__))"
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        OUTPUT_VARIABLE TORCH_DISCOVERY
+        RESULT_VARIABLE TORCH_DISCOVERY_RESULT
+    )
+    if(NOT TORCH_DISCOVERY_RESULT EQUAL 0)
+        message(FATAL_ERROR "torch / torch_npu discovery failed in ${Python3_EXECUTABLE}")
+    endif()
+    string(REPLACE "\n" ";" TORCH_DISCOVERY_LIST "${TORCH_DISCOVERY}")
+    list(GET TORCH_DISCOVERY_LIST 0 TORCH_CMAKE_PREFIX_PATH)
+    list(GET TORCH_DISCOVERY_LIST 1 TORCH_NPU_PATH)
 endif()
-string(REPLACE "\n" ";" TORCH_DISCOVERY_LIST "${TORCH_DISCOVERY}")
-list(GET TORCH_DISCOVERY_LIST 0 TORCH_CMAKE_PREFIX_PATH)
-list(GET TORCH_DISCOVERY_LIST 1 TORCH_NPU_PATH)
 find_package(Torch REQUIRED HINTS ${TORCH_CMAKE_PREFIX_PATH})
 
 set(TORCH_NPU_INCLUDE_DIRS ${TORCH_NPU_PATH}/include)
 set(TORCH_NPU_LIBRARIES ${TORCH_NPU_PATH}/lib)
 
-# Shared library loaded with torch.ops.load_library (not a pybind module).
-add_library(custom_op SHARED custom_op.asc)
+if(AKB_SPLIT_BUILD)
+    # Split mode: device kernels, generated launch stubs, and torch glue are
+    # separate translation units linked into one process-local library.
+    add_library(custom_op SHARED
+        custom_op_kernel.asc
+        custom_op_launch.asc
+        custom_op_host.cpp
+    )
+    # The host TU is thin glue, so -O1 trades no measurable runtime. The
+    # ASC module empties CMAKE_CXX_FLAGS_RELEASE, hence the explicit flags;
+    # they must match HOST_TU_FLAGS in build.py for PCH validity.
+    set(_AKB_HOST_TU_OPTIONS
+        -O1
+        -DNDEBUG
+        --gcc-toolchain=${GCC_TOOLCHAIN_ROOT}
+        -include ${CMAKE_CURRENT_SOURCE_DIR}/custom_op_launch_decls.h
+    )
+    if(NOT "${AKB_PCH_PATH}" STREQUAL "")
+        list(APPEND _AKB_HOST_TU_OPTIONS -include-pch ${AKB_PCH_PATH})
+    endif()
+    set_source_files_properties(custom_op_host.cpp PROPERTIES
+        COMPILE_OPTIONS "${_AKB_HOST_TU_OPTIONS}"
+    )
+else()
+    # Shared library loaded with torch.ops.load_library (not a pybind module).
+    add_library(custom_op SHARED custom_op.asc)
+endif()
 
 set_target_properties(custom_op PROPERTIES
     PREFIX "lib"
@@ -93,12 +137,15 @@ set_target_properties(custom_op PROPERTIES
 target_include_directories(custom_op PRIVATE
     ${TORCH_INCLUDE_DIRS}
     ${TORCH_NPU_INCLUDE_DIRS}
+    ${Python3_INCLUDE_DIRS}
 )
 
+# Python3::Python is deliberately not linked: the library is dlopen'd, never
+# imported, and references no Python C API symbols. A NEEDED entry on
+# libpython breaks loading under statically linked interpreters.
 target_link_libraries(custom_op PRIVATE
     ${TORCH_LIBRARIES}
     torch_npu
-    Python3::Python
 )
 
 target_link_directories(custom_op PRIVATE

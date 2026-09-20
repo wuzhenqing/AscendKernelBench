@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,11 +14,19 @@ from ascend_kernel_bench.build import (
     BuildError,
     LoadError,
     _cmake_cache_matches,
+    _pch_key,
+    _TorchFacts,
     _write_if_changed,
     build_custom_op,
+    ensure_host_pch,
+    extract_kernel_signatures,
     find_built_library,
+    generate_launcher_decls,
+    generate_launcher_source,
     load_custom_op,
+    split_asc_source,
 )
+from ascend_kernel_bench.checks.text import HOST_SECTION_MARKER
 
 
 def test_cmake_template_is_process_local() -> None:
@@ -57,19 +66,38 @@ def test_write_if_changed_updates_on_change(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "kernel v2"
 
 
-def test_cmake_cache_matches(tmp_path: Path) -> None:
+def test_read_cmake_cache(tmp_path: Path) -> None:
+    from ascend_kernel_bench.build import _read_cmake_cache
+
+    assert _read_cmake_cache(tmp_path) is None
     build_dir = tmp_path / "build"
     build_dir.mkdir()
-    assert not _cmake_cache_matches(build_dir, "dav-2201", False)
     (build_dir / "CMakeCache.txt").write_text(
-        "CMAKE_ASC_ARCHITECTURES:STRING=dav-2201\n"
-        f"Python3_EXECUTABLE:UNINITIALIZED={sys.executable}\n"
-        "ENABLE_CCACHE:BOOL=OFF\n",
+        "CMAKE_ASC_ARCHITECTURES:STRING=dav-2201\nENABLE_CCACHE:BOOL=OFF\n",
         encoding="utf-8",
     )
-    assert _cmake_cache_matches(build_dir, "dav-2201", False)
-    assert not _cmake_cache_matches(build_dir, "dav-3510", False)
-    assert not _cmake_cache_matches(build_dir, "dav-2201", True)
+    assert _read_cmake_cache(build_dir) == {
+        "CMAKE_ASC_ARCHITECTURES": "dav-2201",
+        "ENABLE_CCACHE": "OFF",
+    }
+
+
+def test_cmake_cache_matches() -> None:
+    expected = {
+        "CMAKE_ASC_ARCHITECTURES": "dav-2201",
+        "Python3_EXECUTABLE": sys.executable,
+        "ENABLE_CCACHE": "OFF",
+    }
+    assert not _cmake_cache_matches(None, expected)
+    cached = dict(expected)
+    assert _cmake_cache_matches(cached, expected)
+    assert not _cmake_cache_matches(
+        {**cached, "CMAKE_ASC_ARCHITECTURES": "dav-3510"}, expected
+    )
+    assert not _cmake_cache_matches({**cached, "ENABLE_CCACHE": "ON"}, expected)
+    # Extra cached variables beyond the expected set are fine.
+    extra = {**cached, "CMAKE_BUILD_TYPE": "Release"}
+    assert _cmake_cache_matches(extra, expected)
 
 
 def test_find_built_library_prefers_sample_dir(tmp_path: Path) -> None:
@@ -110,3 +138,107 @@ def test_loader_missing_file(tmp_path: Path) -> None:
             tmp_path / "missing.so",
             "TORCH_LIBRARY(custom_op, m) {}",
         )
+
+
+_SPLIT_SOURCE = f"""\
+#include "kernel_operator.h"
+__global__ __vector__ void add_custom(__gm__ uint8_t* x, __gm__ uint8_t* z,
+                                      uint32_t totalLength)
+{{
+    AscendC::InitSocState();
+}}
+// ==================== {HOST_SECTION_MARKER} ====================
+#include <torch/library.h>
+TORCH_LIBRARY(custom_op, m) {{ m.def("run(Tensor x) -> Tensor"); }}
+"""
+
+
+def test_split_asc_source_legacy_returns_none() -> None:
+    legacy = "#include <torch/extension.h>\n__global__ __vector__ void k() {}\n"
+    assert split_asc_source(legacy) is None
+
+
+def test_split_asc_source_splits_at_marker() -> None:
+    device, host = split_asc_source(_SPLIT_SOURCE)  # type: ignore[misc]
+    assert "kernel_operator.h" in device
+    assert HOST_SECTION_MARKER not in device
+    assert "torch/library.h" in host
+    assert HOST_SECTION_MARKER not in host
+
+
+def test_split_asc_source_rejects_multiple_markers() -> None:
+    second = f"// ==== {HOST_SECTION_MARKER} ====\n"
+    with pytest.raises(BuildError, match="exactly one"):
+        split_asc_source(_SPLIT_SOURCE + second)
+
+
+def test_split_asc_source_ignores_prose_mentions() -> None:
+    source = f"# not a marker: {HOST_SECTION_MARKER} in prose\n" + _SPLIT_SOURCE
+    assert split_asc_source(source) is not None
+
+
+def test_extract_kernel_signatures_basic() -> None:
+    device, _ = split_asc_source(_SPLIT_SOURCE)  # type: ignore[misc]
+    sigs = extract_kernel_signatures(device)
+    assert [sig.name for sig in sigs] == ["add_custom"]
+    sig = sigs[0]
+    assert "__gm__ uint8_t* x" in sig.decl_params
+    assert "__gm__" not in sig.host_params
+    assert "uint8_t* x" in sig.host_params
+    assert sig.arg_names == "x, z, totalLength"
+
+
+def test_extract_kernel_signatures_ignores_comments() -> None:
+    source = (
+        "// __global__ __vector__ void fake(__gm__ uint8_t* y)\n"
+        "__global__ __vector__ void real(__gm__ uint8_t* x) { }\n"
+    )
+    sigs = extract_kernel_signatures(source)
+    assert [sig.name for sig in sigs] == ["real"]
+
+
+def test_extract_kernel_signatures_requires_kernel() -> None:
+    with pytest.raises(BuildError, match="no __global__"):
+        extract_kernel_signatures("class KernelAdd {};")
+    with pytest.raises(BuildError, match="cannot parse parameter"):
+        extract_kernel_signatures("__global__ __vector__ void k(uint32_t) { }")
+    with pytest.raises(BuildError, match="conflicting parameter"):
+        extract_kernel_signatures(
+            "__global__ __vector__ void k(uint32_t a) { }\n"
+            "__global__ __vector__ void k(uint32_t a, uint32_t b) { }\n"
+        )
+
+
+def test_generate_launcher_source_roundtrip() -> None:
+    device, _ = split_asc_source(_SPLIT_SOURCE)  # type: ignore[misc]
+    sigs = extract_kernel_signatures(device)
+    launcher = generate_launcher_source(sigs)
+    assert "__global__ __vector__ void add_custom(" in launcher
+    assert 'extern "C" void add_custom_launch(' in launcher
+    assert "uint32_t numBlocks, void* stream" in launcher
+    launch_call = "add_custom<<<numBlocks, 0, stream>>>(x, z, totalLength);"
+    assert launch_call in launcher
+    decls = generate_launcher_decls(sigs)
+    assert decls.count('extern "C" void add_custom_launch(') == 1
+    assert decls.rstrip().endswith(";")
+
+
+def test_pch_key_changes_with_facts() -> None:
+    facts = _TorchFacts(
+        bisheng="/opt/bisheng",
+        bisheng_version="clang 15",
+        torch_version="2.10.0",
+        torch_npu_version="2.10.0",
+        python_version="3.12.13",
+        include_dirs=("/a/include",),
+        defines=("USE_DISTRIBUTED",),
+        gcc_toolchain="/usr",
+    )
+    key = _pch_key(facts)
+    assert key == _pch_key(facts)
+    assert key != _pch_key(replace(facts, torch_version="2.11.0"))
+
+
+def test_ensure_host_pch_disabled_without_torch(monkeypatch) -> None:
+    monkeypatch.setenv("ASCEND_KERNEL_BENCH_DISABLE_PCH", "1")
+    assert ensure_host_pch() is None

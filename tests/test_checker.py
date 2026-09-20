@@ -1,10 +1,39 @@
 from ascend_kernel_bench.checker import check_custom_op_asc, check_model_new
+from ascend_kernel_bench.checks.text import HOST_SECTION_MARKER
 from ascend_kernel_bench.prompt import load_examples
 
 _TORCH_LIB_BINDING = """
 TORCH_LIBRARY(custom_op, m) { m.def("run(Tensor x) -> Tensor"); }
 TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, m) { m.impl("run", TORCH_FN(run)); }
 """
+
+_MARKER_LINE = (
+    f"// ==================== {HOST_SECTION_MARKER} ===================="
+)
+
+
+def _split_source(device: str, host: str) -> str:
+    return f"{device}\n{_MARKER_LINE}\n{host}\n"
+
+
+_SPLIT_DEVICE = """
+#include "kernel_operator.h"
+__global__ __vector__ void k(__gm__ uint8_t* x) {
+    AscendC::InitSocState();
+}
+"""
+
+_SPLIT_HOST = (
+    """
+#include <torch/library.h>
+#include <ATen/ATen.h>
+namespace custom_op_ns { at::Tensor run(const at::Tensor& x) {
+    k_launch(1, nullptr, (uint8_t*)(x.mutable_data_ptr()));
+    return x;
+} }
+"""
+    + _TORCH_LIB_BINDING
+)
 
 
 def _minimal_kernel(binding: str) -> str:
@@ -200,3 +229,44 @@ def test_model_new_rejects_functional_and_torch_compute() -> None:
     assert any("functional" in item for item in check_model_new(functional))
     matmul = _wrapper("return torch.matmul(x, x)")
     assert any("matmul" in item for item in check_model_new(matmul))
+
+
+def test_split_layout_accepted() -> None:
+    assert check_custom_op_asc(_split_source(_SPLIT_DEVICE, _SPLIT_HOST)) == []
+
+
+def test_split_layout_rejects_duplicate_markers() -> None:
+    source = _split_source(_SPLIT_DEVICE, _SPLIT_HOST) + _MARKER_LINE + "\n"
+    violations = check_custom_op_asc(source)
+    assert any("exactly one" in item for item in violations)
+
+
+def test_split_layout_rejects_torch_include_in_device_section() -> None:
+    device = "#include <torch/extension.h>\n" + _SPLIT_DEVICE
+    violations = check_custom_op_asc(_split_source(device, _SPLIT_HOST))
+    assert any("device section" in item for item in violations)
+
+
+def test_split_layout_rejects_kernel_in_host_section() -> None:
+    host = _SPLIT_HOST + "\n__global__ __vector__ void stray() {}\n"
+    violations = check_custom_op_asc(_split_source(_SPLIT_DEVICE, host))
+    assert any("host section" in item for item in violations)
+
+
+def test_split_layout_requires_binding_in_host_section() -> None:
+    violations = check_custom_op_asc(
+        _split_source(_SPLIT_DEVICE, "#include <torch/library.h>\n")
+    )
+    assert any("TORCH_LIBRARY" in item for item in violations)
+
+
+def test_split_layout_rejects_unknown_launch_call() -> None:
+    host = _SPLIT_HOST.replace("k_launch(", "missing_kernel_launch(")
+    violations = check_custom_op_asc(_split_source(_SPLIT_DEVICE, host))
+    assert any("missing_kernel_launch" in item for item in violations)
+
+
+def test_split_layout_still_bans_pybind() -> None:
+    host = _SPLIT_HOST + "\nPYBIND11_MODULE(custom_op, m) {}\n"
+    violations = check_custom_op_asc(_split_source(_SPLIT_DEVICE, host))
+    assert any("pybind11" in item for item in violations)
