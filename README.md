@@ -40,8 +40,7 @@ execution.
 [Documentation](docs/index.md) ·
 [Getting started](docs/guide/getting-started.md) ·
 [Evaluation protocol](docs/guide/evaluation.md) ·
-[Results and metrics](docs/guide/results.md) ·
-[Contributing](CONTRIBUTING.md)
+[Results and metrics](docs/guide/results.md)
 
 ## Why this benchmark
 
@@ -202,11 +201,8 @@ requirements.txt             Third-party dependencies for every machine
 Optional when you change Python under `src/` or `scripts/`:
 
 ```bash
-python -m pip install -r requirements.txt
 pre-commit install && pre-commit run --all-files
 ```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Acknowledgments and license
 

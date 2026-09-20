@@ -1,8 +1,7 @@
 # AGENTS.md
 
-Working agreement for AI coding agents in this repository. `CONTRIBUTING.md`
-is the human style and review contract; this file is the fast path to being
-productive here without re-deriving the architecture.
+Working agreement for AI coding agents in this repository. It is the fast path
+to being productive here without re-deriving the architecture.
 
 **Maintenance rule:** if your change alters a command, directory, protocol
 constant, or invariant described here, update this file in the same change.
@@ -258,3 +257,7 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
    `docs/` page — and this file if any of the above changed.
 4. No global installs, no reformatted vendored tasks, no committed
    `runs/`, `results/`, `*.so`, or API keys.
+
+## Editing these instructions
+
+`CLAUDE.md` symlinks this file; edit `AGENTS.md` only.
