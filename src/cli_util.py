@@ -64,16 +64,12 @@ def resolve_generation_settings(
 ) -> GenerationSettings:
     """Resolve generation settings from YAML with optional CLI overrides."""
     gen_cfg = dict(config.generation)
-    effort = (
-        reasoning_effort or str(gen_cfg.get("reasoning_effort", "")).strip()
-    )
+    effort = reasoning_effort or str(gen_cfg.get("reasoning_effort", "")).strip()
     return GenerationSettings(
         model=model or str(gen_cfg.get("model", "deepseek-flash")),
         prompt_mode=prompt_mode or str(gen_cfg.get("prompt_mode", "one_shot")),
         temperature=float(
-            gen_cfg.get("temperature", 0.0)
-            if temperature is None
-            else temperature
+            gen_cfg.get("temperature", 0.0) if temperature is None else temperature
         ),
         max_tokens=(
             int(gen_cfg.get("max_tokens", 131072))

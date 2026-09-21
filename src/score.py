@@ -61,9 +61,7 @@ def fast_p(samples: Sequence[Mapping[str, Any]]) -> dict[str, float]:
 
 def geometric_mean_speedup(samples: Sequence[Mapping[str, Any]]) -> float:
     """Return the geometric mean speedup over correct, non-flagged samples."""
-    speedups = [
-        s for s in (sample_speedup(x) for x in samples) if s is not None
-    ]
+    speedups = [s for s in (sample_speedup(x) for x in samples) if s is not None]
     if not speedups:
         return 0.0
     return float(geometric_mean(speedups))
@@ -75,9 +73,7 @@ def pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
         return float(num_correct > 0)
     if num_samples - num_correct < k:
         return 1.0
-    return 1.0 - math.comb(num_samples - num_correct, k) / math.comb(
-        num_samples, k
-    )
+    return 1.0 - math.comb(num_samples - num_correct, k) / math.comb(num_samples, k)
 
 
 def summarize_eval_results(
@@ -99,9 +95,7 @@ def summarize_eval_results(
     npu_reference = sum(
         1 for sample in all_samples if _meta(sample).get("reference") == "npu"
     )
-    flagged = sum(
-        1 for sample in all_samples if _meta(sample).get("excessive_speedup")
-    )
+    flagged = sum(1 for sample in all_samples if _meta(sample).get("excessive_speedup"))
     per_problem: dict[str, dict[str, Any]] = {}
     for problem_id, samples in eval_results.items():
         n = len(samples)
@@ -120,9 +114,7 @@ def summarize_eval_results(
         "npu_reference": npu_reference,
         "excessive_speedup": flagged,
         "fast_p": fast_p(all_samples),
-        "geometric_mean_speedup_correct_only": geometric_mean_speedup(
-            all_samples
-        ),
+        "geometric_mean_speedup_correct_only": geometric_mean_speedup(all_samples),
         "mean_sol_score": mean_sol_score(all_samples),
         "per_problem": per_problem,
     }

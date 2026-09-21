@@ -41,9 +41,7 @@ def _validate_contract(task_py: str, task_id: str) -> None:
     try:
         tree = ast.parse(task_py)
     except SyntaxError as exc:
-        raise ValueError(
-            f"{task_id}: task source has a syntax error: {exc}"
-        ) from exc
+        raise ValueError(f"{task_id}: task source has a syntax error: {exc}") from exc
     top_level = {getattr(n, "name", None) for n in tree.body}
     top_level |= {
         n.targets[0].id
@@ -69,9 +67,7 @@ def load_task(task_id: str, kb_root: Path | None = None) -> Task:
     root = Path(kb_root) if kb_root else KB_ROOT
     match = TASK_ID_RE.match(task_id)
     if not match:
-        raise ValueError(
-            f"Invalid task id {task_id!r}; expected 'level{{L}}/{{stem}}'"
-        )
+        raise ValueError(f"Invalid task id {task_id!r}; expected 'level{{L}}/{{stem}}'")
     task_file = root / task_id
     if task_file.is_dir():
         task_file = task_file / "task.py"  # tolerate legacy migrated layout
@@ -96,18 +92,14 @@ def _sort_key(path: Path) -> tuple[int, str]:
     return (int(match.group("num")) if match else 0, path.stem)
 
 
-def discover_tasks(
-    level: int | None = None, kb_root: Path | None = None
-) -> list[Task]:
+def discover_tasks(level: int | None = None, kb_root: Path | None = None) -> list[Task]:
     """Discover tasks under the KernelBench root, sorted by level and stem.
 
     With level set, only that levelN directory is scanned.
     """
     root = Path(kb_root) if kb_root else KB_ROOT
     tasks: list[Task] = []
-    level_dirs = (
-        [root / f"level{level}"] if level else sorted(root.glob("level*"))
-    )
+    level_dirs = [root / f"level{level}"] if level else sorted(root.glob("level*"))
     for level_dir in level_dirs:
         if not level_dir.is_dir():
             continue

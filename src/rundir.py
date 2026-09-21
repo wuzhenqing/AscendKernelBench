@@ -84,16 +84,10 @@ def save_sample(
     out_dir = sample_dir(run_dir, task_id, sample_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
-    (out_dir / "custom_op.asc").write_text(
-        generation.custom_op_asc, encoding="utf-8"
-    )
-    (out_dir / "model_new.py").write_text(
-        generation.model_new_py, encoding="utf-8"
-    )
+    (out_dir / "custom_op.asc").write_text(generation.custom_op_asc, encoding="utf-8")
+    (out_dir / "model_new.py").write_text(generation.model_new_py, encoding="utf-8")
     if raw_response:
-        (out_dir / "response_raw.txt").write_text(
-            raw_response, encoding="utf-8"
-        )
+        (out_dir / "response_raw.txt").write_text(raw_response, encoding="utf-8")
     return out_dir
 
 
@@ -110,9 +104,7 @@ def iter_sample_dirs(
             continue
         task_id = f"{task_dir.parent.name}/{task_dir.name}"
         for sdir in sorted(task_dir.glob("sample_*")):
-            if (sdir / "custom_op.asc").is_file() and (
-                sdir / "model_new.py"
-            ).is_file():
+            if (sdir / "custom_op.asc").is_file() and (sdir / "model_new.py").is_file():
                 yield task_id, int(sdir.name.split("_", 1)[1]), sdir
 
 
@@ -134,15 +126,11 @@ def collect_eval_results(run_dir: Path) -> dict[str, list[dict[str, Any]]]:
         result = load_eval_result(sdir)
         if result is None:
             continue
-        results.setdefault(task_id, []).append(
-            {"sample_id": sample_id, **result}
-        )
+        results.setdefault(task_id, []).append({"sample_id": sample_id, **result})
     return results
 
 
-def write_eval_results(
-    run_dir: Path, results: dict[str, list[dict[str, Any]]]
-) -> Path:
+def write_eval_results(run_dir: Path, results: dict[str, list[dict[str, Any]]]) -> Path:
     """Write eval_results.json atomically."""
     path = Path(run_dir) / "eval_results.json"
     write_json_atomic(path, results)

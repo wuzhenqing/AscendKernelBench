@@ -41,9 +41,7 @@ __all__ = [
 ]
 
 
-def _persist_eval_result(
-    sample_dir: Path, result: dict[str, Any]
-) -> dict[str, Any]:
+def _persist_eval_result(sample_dir: Path, result: dict[str, Any]) -> dict[str, Any]:
     """Write eval_result.json when sample_dir exists and return it."""
     if Path(sample_dir).is_dir():
         write_json_atomic(Path(sample_dir) / "eval_result.json", result)
@@ -76,9 +74,7 @@ def eval_sample(
         return _persist_eval_result(
             sample_dir,
             fail_result(
-                compilation_error=(
-                    "sample dir missing custom_op.asc or model_new.py"
-                )
+                compilation_error=("sample dir missing custom_op.asc or model_new.py")
             ),
         )
 
@@ -195,8 +191,7 @@ def _run_eval_worker(cfg: dict[str, Any], timeout_s: int) -> dict[str, Any]:
     if outcome.returncode != 0:
         err = outcome.stderr.strip()
         return fail_result(
-            runtime_error=err[-2000:]
-            or f"worker exited with code {outcome.returncode}"
+            runtime_error=err[-2000:] or f"worker exited with code {outcome.returncode}"
         )
     if outcome.payload is not None:
         return outcome.payload

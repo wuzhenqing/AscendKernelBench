@@ -228,13 +228,9 @@ class WrapperSemantics(ast.NodeVisitor):
 
     def _is_custom_op_path(self, path: str) -> bool:
         """Return True if path is torch.ops.custom_op or an alias."""
-        if path == "torch.ops.custom_op" or path.startswith(
-            "torch.ops.custom_op."
-        ):
+        if path == "torch.ops.custom_op" or path.startswith("torch.ops.custom_op."):
             return True
-        return any(
-            path == ref or path.startswith(ref + ".") for ref in self.co_refs
-        )
+        return any(path == ref or path.startswith(ref + ".") for ref in self.co_refs)
 
     def _collect_aliases(self, tree: ast.AST) -> None:
         """Record import aliases and flag banned import roots."""
@@ -256,9 +252,7 @@ class WrapperSemantics(ast.NodeVisitor):
                 )
             if root in _BANNED_IMPORT_ROOTS:
                 self._flag(f"banned import: {alias.name}")
-            self.aliases[alias.asname or root] = (
-                alias.name if alias.asname else root
-            )
+            self.aliases[alias.asname or root] = alias.name if alias.asname else root
 
     def _record_import_from(self, node: ast.ImportFrom) -> None:
         """Bind from-imports and reject unauditable star imports."""
@@ -287,17 +281,13 @@ class WrapperSemantics(ast.NodeVisitor):
             if parts is None:
                 continue
             targets, value = parts
-            if len(targets) == 1 and isinstance(
-                targets[0], (ast.Tuple, ast.List)
-            ):
+            if len(targets) == 1 and isinstance(targets[0], (ast.Tuple, ast.List)):
                 self._bind_unpacked(targets[0].elts, value)
                 continue
             for target in targets:
                 self._bind_one_target(target, value)
 
-    def _assignment_parts(
-        self, node: ast.AST
-    ) -> tuple[list[ast.AST], ast.AST] | None:
+    def _assignment_parts(self, node: ast.AST) -> tuple[list[ast.AST], ast.AST] | None:
         """Return assignment targets and value, or bind a range loop."""
         if isinstance(node, ast.Assign):
             return node.targets, node.value
@@ -327,8 +317,7 @@ class WrapperSemantics(ast.NodeVisitor):
                     self.scalar_refs.add(elt.id)
             return
         if not (
-            isinstance(value, (ast.Tuple, ast.List))
-            and len(value.elts) == len(elts)
+            isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(elts)
         ):
             return
         for tgt, val in zip(elts, value.elts, strict=True):
@@ -478,9 +467,7 @@ class WrapperSemantics(ast.NodeVisitor):
             return True
         if name == "getattr" and node.args:
             base = self._resolve(node.args[0])
-            if base and (
-                base == "torch" or base.startswith(("torch.", "torch_npu"))
-            ):
+            if base and (base == "torch" or base.startswith(("torch.", "torch_npu"))):
                 self._flag("getattr() on torch modules (dynamic op access)")
                 return True
         return flagged
@@ -519,9 +506,7 @@ class WrapperSemantics(ast.NodeVisitor):
                 return False
             self._flag(f"{func_path}() is not allowed in model_new.py")
             return True
-        if func_path.startswith(
-            ("os.system", "os.popen", "os.exec", "os.spawn")
-        ):
+        if func_path.startswith(("os.system", "os.popen", "os.exec", "os.spawn")):
             self._flag(f"host process execution: {func_path}()")
             return True
         return False
@@ -529,9 +514,7 @@ class WrapperSemantics(ast.NodeVisitor):
     def visit_BinOp(self, node: ast.BinOp) -> None:
         """Flag tensor arithmetic and @; allow integer shape math."""
         if isinstance(node.op, ast.MatMult):
-            self._flag(
-                "@ (matmul) operator — compute must live in the Ascend C kernel"
-            )
+            self._flag("@ (matmul) operator — compute must live in the Ascend C kernel")
         elif isinstance(node.op, _ARITH_OPS) and not (
             self._is_scalar(node.left) and self._is_scalar(node.right)
         ):
@@ -545,17 +528,13 @@ class WrapperSemantics(ast.NodeVisitor):
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
         """Flag in-place tensor arithmetic and @=."""
         if not isinstance(node.op, ast.MatMult):
-            if not (
-                self._is_scalar(node.target) and self._is_scalar(node.value)
-            ):
+            if not (self._is_scalar(node.target) and self._is_scalar(node.value)):
                 self._flag(
                     "in-place arithmetic on non-scalar values — tensor compute "
                     "must live in the Ascend C kernel"
                 )
         else:
-            self._flag(
-                "@ (matmul) operator — compute must live in the Ascend C kernel"
-            )
+            self._flag("@ (matmul) operator — compute must live in the Ascend C kernel")
         self.generic_visit(node)
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> None:
@@ -576,8 +555,7 @@ class WrapperSemantics(ast.NodeVisitor):
             return
         operands = [node.left, *node.comparators]
         none_check = any(
-            isinstance(item, ast.Constant) and item.value is None
-            for item in operands
+            isinstance(item, ast.Constant) and item.value is None for item in operands
         )
         if not none_check and not all(self._is_scalar(o) for o in operands):
             self._flag(

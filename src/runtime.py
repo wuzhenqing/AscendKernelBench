@@ -40,14 +40,10 @@ def torch_dtype_for(precision: str) -> Any:
 def cann_runtime_facts() -> dict[str, str]:
     """Return CANN identity from the environment, or empty when unset."""
     facts: dict[str, str] = {}
-    explicit = os.environ.get("ASCEND_VERSION") or os.environ.get(
-        "CANN_VERSION"
-    )
+    explicit = os.environ.get("ASCEND_VERSION") or os.environ.get("CANN_VERSION")
     if explicit:
         facts["cann_version"] = explicit.strip()
-    home = os.environ.get("ASCEND_HOME_PATH") or os.environ.get(
-        "ASCEND_TOOLKIT_HOME"
-    )
+    home = os.environ.get("ASCEND_HOME_PATH") or os.environ.get("ASCEND_TOOLKIT_HOME")
     if home:
         facts["ascend_home"] = home
         if "cann_version" not in facts:
@@ -73,7 +69,5 @@ def npu_runtime_metadata(device: str) -> dict[str, Any]:
     metadata["torch_version"] = torch.__version__
     metadata["torch_npu_version"] = getattr(torch_npu, "__version__", "unknown")
     with contextlib.suppress(Exception):
-        metadata["device_name"] = torch.npu.get_device_name(
-            npu_device_index(device)
-        )
+        metadata["device_name"] = torch.npu.get_device_name(npu_device_index(device))
     return metadata

@@ -166,9 +166,7 @@ def _check_pybind_ban(code: str) -> list[str]:
 def _check_split_layout(source: str) -> list[str]:
     """Validate the two-section layout of a new-style split source."""
     lines = source.splitlines()
-    markers = [
-        i for i, line in enumerate(lines) if HOST_SECTION_MARKER_RE.match(line)
-    ]
+    markers = [i for i, line in enumerate(lines) if HOST_SECTION_MARKER_RE.match(line)]
     if len(markers) != 1:
         return [
             f"custom_op.asc must carry exactly one comment line containing "
@@ -213,13 +211,9 @@ def _check_split_layout(source: str) -> list[str]:
         )
     kernels = {
         match.group(1)
-        for match in re.finditer(
-            r"__global__\s+__vector__\s+void\s+(\w+)\s*\(", device
-        )
+        for match in re.finditer(r"__global__\s+__vector__\s+void\s+(\w+)\s*\(", device)
     }
-    calls = {
-        match.group(1) for match in re.finditer(r"\b(\w+)_launch\s*\(", host)
-    }
+    calls = {match.group(1) for match in re.finditer(r"\b(\w+)_launch\s*\(", host)}
     for name in sorted(calls - kernels):
         violations.append(
             f"host section calls {name}_launch(...) but no __global__ "
@@ -249,18 +243,14 @@ def _check_asc_aten(code: str) -> list[str]:
             "Ascend C kernel, not in libtorch"
         )
     if re.search(r"\bat::native::", code):
-        violations.append(
-            "at::native:: call — direct ATen kernel reuse is not allowed"
-        )
+        violations.append("at::native:: call — direct ATen kernel reuse is not allowed")
     return violations
 
 
 def _check_asc_methods(code: str) -> list[str]:
     """Flag host-side tensor compute methods (.relu(), ->matmul())."""
     method_re = r"(?:\.|->)(" + "|".join(_ASC_COMPUTE_METHODS) + r")\s*\("
-    bad_methods = sorted(
-        {match.group(1) for match in re.finditer(method_re, code)}
-    )
+    bad_methods = sorted({match.group(1) for match in re.finditer(method_re, code)})
     return [
         f"host-side tensor method .{name}(...) — compute must live in the "
         "Ascend C kernel"

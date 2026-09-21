@@ -28,9 +28,7 @@ def _strip_fence(value: str) -> str:
     body = match.group("body") if match else value
     # Some models emit a bare filename line ("custom_op.asc") as the first line.
     lines = body.split("\n")
-    if lines and re.fullmatch(
-        r"\s*(custom_op\.asc|model_new\.py)\s*", lines[0]
-    ):
+    if lines and re.fullmatch(r"\s*(custom_op\.asc|model_new\.py)\s*", lines[0]):
         body = "\n".join(lines[1:])
     return body
 
@@ -186,9 +184,7 @@ class LLMClient:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
-        messages.append(
-            {"role": "user", "content": prompt + STRUCTURED_OUTPUT_NOTE}
-        )
+        messages.append({"role": "user", "content": prompt + STRUCTURED_OUTPUT_NOTE})
 
         last_error: Exception | None = None
         last_raw = ""
@@ -307,9 +303,7 @@ def _append_retry_turn(messages: list[dict], last_raw: str) -> None:
     messages.append({"role": "user", "content": _RETRY_REMINDER})
 
 
-_FENCE_RE = re.compile(
-    r"```(?P<tag>[A-Za-z0-9_+.-]*)\s*\n(?P<body>.*?)```", re.DOTALL
-)
+_FENCE_RE = re.compile(r"```(?P<tag>[A-Za-z0-9_+.-]*)\s*\n(?P<body>.*?)```", re.DOTALL)
 
 
 def extract_generation(text: str) -> AscendCGeneration:
@@ -323,14 +317,10 @@ def extract_generation(text: str) -> AscendCGeneration:
         return payload
     blocks = list(_FENCE_RE.finditer(text))
     if not blocks:
-        raise ValueError(
-            "no JSON fields and no fenced code blocks in model response"
-        )
+        raise ValueError("no JSON fields and no fenced code blocks in model response")
     asc_src, py_src = _pair_fenced_blocks(blocks)
     if asc_src is None or py_src is None:
-        raise ValueError(
-            "could not identify custom_op.asc and model_new.py blocks"
-        )
+        raise ValueError("could not identify custom_op.asc and model_new.py blocks")
     return AscendCGeneration(custom_op_asc=asc_src, model_new_py=py_src)
 
 

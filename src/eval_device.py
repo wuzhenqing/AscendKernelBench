@@ -81,14 +81,11 @@ def exec_python_source(
     return populated
 
 
-def cpu_reference_inputs(
-    raw_inputs: Sequence[Any], torch_mod: Any
-) -> list[Any]:
+def cpu_reference_inputs(raw_inputs: Sequence[Any], torch_mod: Any) -> list[Any]:
     """Cast floating CPU-reference inputs to float32; leave others as-is."""
     return [
         item.float()
-        if isinstance(item, torch_mod.Tensor)
-        and torch_mod.is_floating_point(item)
+        if isinstance(item, torch_mod.Tensor) and torch_mod.is_floating_point(item)
         else item
         for item in raw_inputs
     ]
@@ -186,9 +183,7 @@ class SampleEvaluator:
 
     def _build_and_load(self) -> dict[str, Any] | None:
         """Compile and load libcustom_op.so; fail-payload on error."""
-        asc_source = (self.sample_path / "custom_op.asc").read_text(
-            encoding="utf-8"
-        )
+        asc_source = (self.sample_path / "custom_op.asc").read_text(encoding="utf-8")
         self.metadata["build_mode"] = (
             "split" if split_asc_source(asc_source) is not None else "legacy"
         )
@@ -209,9 +204,7 @@ class SampleEvaluator:
                 runtime_error=f"shared library load failed: {exc}",
             )
         finally:
-            self.metadata["build_seconds"] = round(
-                time.monotonic() - started, 3
-            )
+            self.metadata["build_seconds"] = round(time.monotonic() - started, 3)
         return None
 
     def _load_python_modules(self) -> dict[str, Any] | None:
@@ -285,9 +278,7 @@ class SampleEvaluator:
             ref_mode=self.ref_mode,
             atol=self.atol,
             rtol=self.rtol,
-            custom_check=(
-                self.custom_check if callable(self.custom_check) else None
-            ),
+            custom_check=(self.custom_check if callable(self.custom_check) else None),
         )
 
     def _run_ref_cpu(self, raw_inputs: Sequence[Any]) -> Any:
@@ -347,9 +338,7 @@ class SampleEvaluator:
         except Exception as exc:
             return fail_result(
                 compiled=True,
-                runtime_error=(
-                    f"trial {trial}: candidate runtime error: {exc!r}"
-                ),
+                runtime_error=(f"trial {trial}: candidate runtime error: {exc!r}"),
             )
         if inputs_were_mutated(inputs, ref_snapshot):
             return fail_result(
@@ -429,13 +418,9 @@ class SampleEvaluator:
                 self.runtime_stats = get_timing_stats(timed(self.new_model))
                 self.runtime = self.runtime_stats["mean"]
                 if self.ref_mode == "npu":
-                    self.ref_runtime_stats = get_timing_stats(
-                        timed(self.ref_model)
-                    )
+                    self.ref_runtime_stats = get_timing_stats(timed(self.ref_model))
                     self.ref_runtime = self.ref_runtime_stats["mean"]
-                    speedup = (
-                        self.ref_runtime / self.runtime if self.runtime else 0.0
-                    )
+                    speedup = self.ref_runtime / self.runtime if self.runtime else 0.0
                     self.metadata["speedup"] = float(f"{speedup:.4g}")
                     self.metadata["excessive_speedup"] = bool(
                         speedup > self.req.excessive_speedup
@@ -443,9 +428,7 @@ class SampleEvaluator:
             attach_sol_metadata(
                 self.metadata,
                 kernel_ms=(
-                    self.runtime
-                    if isinstance(self.runtime, int | float)
-                    else None
+                    self.runtime if isinstance(self.runtime, int | float) else None
                 ),
                 baseline_ms=(
                     self.ref_runtime
@@ -456,9 +439,7 @@ class SampleEvaluator:
                 bandwidth_gbps=float(self.req.memory_bandwidth_gbps),
                 flops=task_declared_flops(self.ref_globals),
                 peak_tflops=(
-                    float(self.req.peak_tflops)
-                    if self.req.peak_tflops
-                    else None
+                    float(self.req.peak_tflops) if self.req.peak_tflops else None
                 ),
             )
         except Exception as exc:
@@ -489,9 +470,7 @@ class SampleEvaluator:
                 )
                 return self.metadata
         except Exception as exc:
-            self.metadata["runtime_error"] = (
-                f"post-timing re-check failed: {exc!r}"
-            )
+            self.metadata["runtime_error"] = f"post-timing re-check failed: {exc!r}"
             return self.metadata
         return None
 

@@ -139,10 +139,7 @@ def snapshot_inputs(inputs: Sequence[Any]) -> list[Any]:
     """Clone top-level tensors so later mutations can be detected."""
     import torch
 
-    return [
-        item.clone() if isinstance(item, torch.Tensor) else item
-        for item in inputs
-    ]
+    return [item.clone() if isinstance(item, torch.Tensor) else item for item in inputs]
 
 
 def inputs_were_mutated(inputs: Sequence[Any], snapshot: Sequence[Any]) -> bool:

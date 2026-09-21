@@ -153,9 +153,7 @@ def load_examples() -> list[PromptExample]:
                 custom_op_asc=(example_dir / "custom_op.asc").read_text(
                     encoding="utf-8"
                 ),
-                model_new_py=(example_dir / "model_new.py").read_text(
-                    encoding="utf-8"
-                ),
+                model_new_py=(example_dir / "model_new.py").read_text(encoding="utf-8"),
             )
         )
     return examples

@@ -91,9 +91,7 @@ class IsolatedJsonWorker:
         if self.result_key == "result_path":
             worker = REPO_ROOT / "scripts" / "_eval_worker.py"
             if not worker.is_file():
-                raise FileNotFoundError(
-                    f"eval worker script not found: {worker}"
-                )
+                raise FileNotFoundError(f"eval worker script not found: {worker}")
             return [sys.executable, str(worker), str(cfg_path)]
         return [
             sys.executable,
@@ -119,9 +117,7 @@ class IsolatedJsonWorker:
         with tempfile.TemporaryDirectory(prefix=self.prefix) as tmpdir:
             result_path = Path(tmpdir) / "result.json"
             cfg_path = Path(tmpdir) / "cfg.json"
-            write_json_atomic(
-                cfg_path, {**cfg, self.result_key: str(result_path)}
-            )
+            write_json_atomic(cfg_path, {**cfg, self.result_key: str(result_path)})
             env = dict(os.environ)
             env.setdefault("ASCEND_SLOG_PRINT_TO_STDOUT", "0")
             argv = self.argv_for(cfg_path)

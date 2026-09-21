@@ -83,9 +83,7 @@ def strip_python_comments(code: str) -> str:
             for i in range(start, end):
                 chars[i] = " "
     except (tokenize.TokenError, IndentationError):
-        return "\n".join(
-            line.split("#", 1)[0].rstrip() for line in code.splitlines()
-        )
+        return "\n".join(line.split("#", 1)[0].rstrip() for line in code.splitlines())
     return "".join(chars)
 
 

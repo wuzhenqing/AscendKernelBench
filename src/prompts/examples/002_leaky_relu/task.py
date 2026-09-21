@@ -10,9 +10,7 @@ class Model(nn.Module):
         self.negative_slope = negative_slope
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.nn.functional.leaky_relu(
-            x, negative_slope=self.negative_slope
-        )
+        return torch.nn.functional.leaky_relu(x, negative_slope=self.negative_slope)
 
 
 def get_inputs():

@@ -89,9 +89,7 @@ def cann_env() -> dict[str, str]:
         timeout=60,
     )
     if result.returncode != 0:
-        raise BuildError(
-            f"Failed to source CANN env {set_env}: {result.stderr}"
-        )
+        raise BuildError(f"Failed to source CANN env {set_env}: {result.stderr}")
     env = dict(os.environ)
     for line in result.stdout.splitlines():
         if "=" in line:
@@ -136,9 +134,7 @@ class KernelSignature:
     arg_names: str
 
 
-_KERNEL_DEF_RE = re.compile(
-    r"__global__\s+__vector__\s+void\s+(\w+)\s*\(([^()]*)\)"
-)
+_KERNEL_DEF_RE = re.compile(r"__global__\s+__vector__\s+void\s+(\w+)\s*\(([^()]*)\)")
 _PARAM_RE = re.compile(r"^(.+?[\s*])([A-Za-z_]\w*)$")
 
 
@@ -159,9 +155,7 @@ def _parse_kernel_params(kernel_name: str, raw_params: str) -> KernelSignature:
         host_param = " ".join(param.replace("__gm__", " ").split())
         match = _PARAM_RE.match(host_param)
         if match is None:
-            raise BuildError(
-                f"kernel {kernel_name}: cannot parse parameter {param!r}"
-            )
+            raise BuildError(f"kernel {kernel_name}: cannot parse parameter {param!r}")
         decl_parts.append(param)
         host_parts.append(f"{match.group(1).strip()} {match.group(2)}")
         names.append(match.group(2))
@@ -191,9 +185,7 @@ def extract_kernel_signatures(device_source: str) -> list[KernelSignature]:
             )
         sigs.setdefault(sig.name, sig)
     if not sigs:
-        raise BuildError(
-            "no __global__ __vector__ kernel found in the device section"
-        )
+        raise BuildError("no __global__ __vector__ kernel found in the device section")
     return list(sigs.values())
 
 
@@ -205,9 +197,7 @@ def generate_launcher_source(sigs: list[KernelSignature]) -> str:
         "",
     ]
     for sig in sigs:
-        parts.append(
-            f"__global__ __vector__ void {sig.name}({sig.decl_params});"
-        )
+        parts.append(f"__global__ __vector__ void {sig.name}({sig.decl_params});")
     parts.append("")
     for sig in sigs:
         params = ", ".join(
@@ -385,9 +375,7 @@ def ensure_host_pch() -> Path | None:
     re-parsing the torch headers. Returns None when PCH use is disabled or
     unavailable, in which case the host TU compiles without one.
     """
-    disabled = (
-        os.environ.get("ASCEND_KERNEL_BENCH_DISABLE_PCH", "").strip().lower()
-    )
+    disabled = os.environ.get("ASCEND_KERNEL_BENCH_DISABLE_PCH", "").strip().lower()
     if disabled in {"1", "true", "yes", "on"}:
         return None
     facts = _torch_facts()
@@ -415,9 +403,7 @@ def ensure_host_pch() -> Path | None:
 def _emit_host_pch(facts: _TorchFacts, cache_dir: Path) -> None:
     """Emit the host PCH via a temporary file and an atomic rename."""
     input_header = cache_dir / PCH_INPUT_NAME
-    input_header.write_text(
-        "\n".join(HOST_TU_INCLUDES) + "\n", encoding="utf-8"
-    )
+    input_header.write_text("\n".join(HOST_TU_INCLUDES) + "\n", encoding="utf-8")
     tmp_pch = cache_dir / f"{PCH_FILE_NAME}.tmp.{os.getpid()}"
     cmd = [
         facts.bisheng,
@@ -505,13 +491,9 @@ def build_custom_op(
     device_src, host_src = sections
     sigs = extract_kernel_signatures(device_src)
     _write_if_changed(work_dir / KERNEL_ASC_NAME, device_src)
-    _write_if_changed(
-        work_dir / LAUNCH_ASC_NAME, generate_launcher_source(sigs)
-    )
+    _write_if_changed(work_dir / LAUNCH_ASC_NAME, generate_launcher_source(sigs))
     _write_if_changed(work_dir / HOST_CPP_NAME, host_src)
-    _write_if_changed(
-        work_dir / LAUNCH_DECLS_NAME, generate_launcher_decls(sigs)
-    )
+    _write_if_changed(work_dir / LAUNCH_DECLS_NAME, generate_launcher_decls(sigs))
 
     pch = ensure_host_pch()
     try:
@@ -521,9 +503,7 @@ def build_custom_op(
             raise
         logger.warning("split build with PCH failed; retrying without PCH")
         try:
-            _build_via_cmake(
-                work_dir, cmake_arch, timeout_s, split=True, pch=None
-            )
+            _build_via_cmake(work_dir, cmake_arch, timeout_s, split=True, pch=None)
         except BuildError:
             # A genuine source error, not a PCH problem; keep the cache.
             raise first_error from None
@@ -660,8 +640,7 @@ def find_built_library(work_dir: Path) -> Path:
         if candidate.is_file():
             return candidate
     raise BuildError(
-        f"Built shared library not found in {work_dir} "
-        f"(expected {SHARED_LIBRARY_NAME})"
+        f"Built shared library not found in {work_dir} (expected {SHARED_LIBRARY_NAME})"
     )
 
 
@@ -686,15 +665,11 @@ def load_custom_op(so_path: Path, source: str = "") -> None:
     try:
         import torch
     except ImportError as exc:
-        raise LoadError(
-            "torch is required to load a TORCH_LIBRARY operator"
-        ) from exc
+        raise LoadError("torch is required to load a TORCH_LIBRARY operator") from exc
     try:
         torch.ops.load_library(str(so_path))
     except Exception as exc:
-        raise LoadError(
-            f"torch.ops.load_library({so_path}) failed: {exc!r}"
-        ) from exc
+        raise LoadError(f"torch.ops.load_library({so_path}) failed: {exc!r}") from exc
 
 
 def _run_cmake(

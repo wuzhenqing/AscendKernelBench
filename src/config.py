@@ -76,9 +76,7 @@ class EvalConfig(BaseModel):
     hardware: str = "ascend910b2"
     num_correct_trials: int = 5
     seed: int = 42
-    tolerances: dict[str, dict[str, float]] = Field(
-        default_factory=_default_tolerances
-    )
+    tolerances: dict[str, dict[str, float]] = Field(default_factory=_default_tolerances)
     precision: str = "fp32"
     num_perf_trials: int = 100
     num_warmup: int = 10
@@ -114,8 +112,7 @@ def load_hardware_profile(name_or_path: str) -> HardwareProfile:
     if not candidate.is_file():
         available = sorted(path.stem for path in HARDWARE_DIR.glob("*.yaml"))
         raise FileNotFoundError(
-            f"Hardware profile not found: {name_or_path}. "
-            f"Available: {available}"
+            f"Hardware profile not found: {name_or_path}. Available: {available}"
         )
     loaded = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
     return HardwareProfile.from_dict(loaded)
