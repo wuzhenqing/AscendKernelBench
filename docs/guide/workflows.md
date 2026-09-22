@@ -54,7 +54,7 @@ A static check is available without a compiler, endpoint, or NPU:
 ```bash
 python - <<'PY'
 from pathlib import Path
-from ascend_kernel_bench.checker import check_custom_op_asc, check_model_new
+from src.checker import check_custom_op_asc, check_model_new
 
 sample = Path("runs/activations-10/level1/19_ReLU/sample_0")
 violations = check_custom_op_asc((sample / "custom_op.asc").read_text())

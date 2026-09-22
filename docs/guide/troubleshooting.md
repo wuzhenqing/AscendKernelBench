@@ -27,11 +27,9 @@ Read the metadata rather than relying on the CLI's `COMPILE-FAIL` / `WRONG` labe
 
 ## Dependencies and repository paths
 
-### `No module named ascend_kernel_bench`
+### `No module named src`
 
-User scripts and the isolated eval worker both bootstrap the checkout `src/` directory (`scripts/_bootstrap.py`, used by `scripts/evaluate.py` and `scripts/_eval_worker.py`). Run commands from a complete checkout so `scripts/_eval_worker.py` exists. An editable `pip install` is optional for that import path.
-
-If the worker still cannot import the package, confirm `ASCEND_KERNEL_BENCH_REPO_ROOT` (when set) points at that checkout, and that you are using the same Python interpreter that has the third-party dependencies installed.
+User scripts and the isolated eval worker add the checkout root to `sys.path` (`scripts/_bootstrap.py`). Run commands from a complete checkout so `scripts/_eval_worker.py` exists, and use the same Python interpreter that has the third-party dependencies installed.
 
 ### Missing `torch` or `torch_npu`
 
@@ -43,13 +41,7 @@ Do not try to resolve a missing `torch_npu` import on macOS by substituting a CP
 
 Task IDs use the form `level1/19_ReLU`, relative to `KernelBench/`. Check the exact filename and level. The checkout must contain `KernelBench/`, `configs/`, and `build_template/`.
 
-Paths default to the repository root inferred from the installed package. If you installed a wheel or need to use a different checkout, set the root before launching Python:
-
-```bash
-export ASCEND_KERNEL_BENCH_REPO_ROOT='/absolute/path/to/AscendKernelBench'
-```
-
-This also chooses the `runs/` and `results/` directories. Changing the current directory alone does not redirect them. Paths are resolved when the module is imported, so restart the Python process after changing this variable.
+Paths are inferred from `src/_paths.py` (the parent of `src/`). That also chooses the `runs/` and `results/` directories. Changing the current directory alone does not redirect them.
 
 ## LLM connection and response errors
 

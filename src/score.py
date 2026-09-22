@@ -96,6 +96,9 @@ def summarize_eval_results(
         1 for sample in all_samples if _meta(sample).get("reference") == "npu"
     )
     flagged = sum(1 for sample in all_samples if _meta(sample).get("excessive_speedup"))
+    hidden_failed = sum(
+        1 for sample in all_samples if _meta(sample).get("hidden_failed")
+    )
     per_problem: dict[str, dict[str, Any]] = {}
     for problem_id, samples in eval_results.items():
         n = len(samples)
@@ -113,6 +116,7 @@ def summarize_eval_results(
         "cpu_reference": cpu_reference,
         "npu_reference": npu_reference,
         "excessive_speedup": flagged,
+        "hidden_failed": hidden_failed,
         "fast_p": fast_p(all_samples),
         "geometric_mean_speedup_correct_only": geometric_mean_speedup(all_samples),
         "mean_sol_score": mean_sol_score(all_samples),

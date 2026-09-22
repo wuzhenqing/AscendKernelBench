@@ -7,6 +7,7 @@ so callers and embedding code keep their own logging setup.
 from __future__ import annotations
 
 import sys
+from typing import NoReturn
 
 from loguru import logger
 
@@ -34,7 +35,7 @@ def setup_logging(*, level: str = "INFO", rich_tracebacks: bool = True) -> None:
     _CONFIGURED = True
 
 
-def die(message: str, code: int = 1) -> None:
+def die(message: str, code: int = 1) -> NoReturn:
     """Log message at error level and exit the process."""
     logger.error(message)
     raise SystemExit(code)

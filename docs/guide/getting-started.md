@@ -27,7 +27,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Run the commands in these guides from the repository root, with the environment activated. Scripts and the isolated eval worker bootstrap the checkout `src/` directory, so an editable install is optional when you already have the third-party dependencies. Tasks, hardware profiles, scripts, and the build template are used directly from the checkout; no dataset submodule initialization is needed.
+Run the commands in these guides from the repository root, with the environment activated. Scripts add the checkout root to `sys.path` and import `src.*`; there is no editable or wheel install. Tasks, hardware profiles, scripts, and the build template are used directly from the checkout; no dataset submodule initialization is needed.
 
 `requirements.txt` is the only dependency file. On Linux it also installs the pinned PyTorch and `torch_npu` pair. It never installs CANN, the NPU driver, or the native build toolchain.
 
@@ -66,7 +66,7 @@ Task discovery reads Python source and checks its top-level contract using the P
 ```bash
 python - <<'PY'
 from collections import Counter
-from ascend_kernel_bench.dataset import discover_tasks, load_task
+from src.dataset import discover_tasks, load_task
 
 tasks = discover_tasks()
 print("Tasks by level:", dict(sorted(Counter(t.level for t in tasks).items())))
@@ -83,9 +83,9 @@ You can also inspect exactly what will be sent to the model, without making an A
 ```bash
 python - <<'PY'
 from pathlib import Path
-from ascend_kernel_bench.config import load_hardware_profile
-from ascend_kernel_bench.dataset import load_task
-from ascend_kernel_bench.prompt import build_prompt
+from src.config import load_hardware_profile
+from src.dataset import load_task
+from src.prompt import build_prompt
 
 prompt = build_prompt(
     load_task("level1/19_ReLU"),

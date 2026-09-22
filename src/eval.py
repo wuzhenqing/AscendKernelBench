@@ -6,7 +6,6 @@ worker subprocess started by evaluate_run.
 
 from __future__ import annotations
 
-import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -15,7 +14,6 @@ from typing import Any
 from loguru import logger
 
 from . import rundir
-from ._paths import REPO_ROOT
 from .checker import check_custom_op_asc, check_model_new
 from .config import (
     EvalConfig,
@@ -29,7 +27,6 @@ from .eval_result import fail_result
 from .io_util import (
     load_cfg_argv,
     pop_required_path,
-    read_json_object,
     write_json_atomic,
 )
 from .process import IsolatedJsonWorker
@@ -144,6 +141,7 @@ def evaluate_run(
         raise ValueError(f"no samples in {run_dir}")
 
     config, hardware = _load_run_settings(run_dir)
+    harness = rundir.generation_harness(run_dir)
     for task_id, sample_id, sample_path in samples:
         result = eval_sample(
             load_task(task_id),
@@ -151,6 +149,10 @@ def evaluate_run(
             hardware=hardware,
             config=config,
         )
+        metadata = result.get("metadata")
+        if harness and isinstance(metadata, dict):
+            metadata["harness"] = harness
+            write_json_atomic(sample_path / "eval_result.json", result)
         if on_sample is not None:
             on_sample(task_id, sample_id, result)
 
@@ -158,14 +160,6 @@ def evaluate_run(
     rundir.write_eval_results(run_dir, results)
     rundir.write_pass_at_k(run_dir, compute_pass_at_k(results))
     return results
-
-
-def _worker_argv(cfg_path: Path) -> list[str]:
-    """Return the argv that starts the isolated eval worker script."""
-    worker = REPO_ROOT / "scripts" / "_eval_worker.py"
-    if not worker.is_file():
-        raise FileNotFoundError(f"eval worker script not found: {worker}")
-    return [sys.executable, str(worker), str(cfg_path)]
 
 
 def worker_main(argv: list[str]) -> None:
@@ -198,18 +192,6 @@ def _run_eval_worker(cfg: dict[str, Any], timeout_s: int) -> dict[str, Any]:
     return fail_result(
         runtime_error=outcome.parse_error or "worker produced no result.json"
     )
-
-
-def _read_worker_payload(result_path: Path) -> dict[str, Any]:
-    """Load the worker JSON object, or return a failed payload."""
-    if not result_path.is_file():
-        return fail_result(runtime_error="worker produced no result.json")
-    try:
-        return read_json_object(result_path)
-    except json.JSONDecodeError as exc:
-        return fail_result(runtime_error=f"invalid worker JSON: {exc}")
-    except ValueError:
-        return fail_result(runtime_error="worker JSON is not an object")
 
 
 if __name__ == "__main__":

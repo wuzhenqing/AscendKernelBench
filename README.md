@@ -165,15 +165,17 @@ python scripts/generate.py \
 Suspicious speedups (`> 10×` by default) stay in `fast_0` and `pass@k`
 but are excluded from positive `fast_p` and the geometric mean. Generation
 failures that never wrote a sample are **absent** from the denominator.
-Compare runs only with matching hardware, CANN, precision, and timing
-settings. These scores are **not** comparable to CUDA KernelBench or to
+Compare runs only with matching hardware, CANN, precision, timing
+settings, and harness (`metadata.harness`: model, prompt mode, reasoning
+effort). These scores are **not** comparable to CUDA KernelBench or to
 NVIDIA SOL-ExecBench numbers.
 
 ## Evaluation environment
 
 The default protocol is:
 
-- 5 seeded correctness trials; all must pass
+- 5 seeded correctness trials, then four hidden value transforms
+  (original, ×3, ×0.01, ×−1); all must pass before timing
 - 10 warmups (SOL-ExecBench-style isolation) and 100 retained NPU-event
   trials (KernelBench-style statistics)
 - L2 flush of `max(256 MiB, 2 × profile L2)` before each timed call
@@ -188,7 +190,7 @@ and must be validated before use.
 
 ```text
 KernelBench/                 Vendored reference tasks, level1–level4
-src/ascend_kernel_bench/     Generation, build, evaluation, and scoring
+src/                         Generation, build, evaluation, and scoring
 scripts/                     Five benchmark CLIs
 configs/                     Eval defaults, hardware profiles, task subsets
 build_template/              CMake project that writes libcustom_op.so

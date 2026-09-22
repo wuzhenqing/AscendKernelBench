@@ -13,17 +13,17 @@ import _bootstrap  # noqa: F401
 from loguru import logger
 from rich.console import Console
 
-from ascend_kernel_bench import rundir
-from ascend_kernel_bench.cli_util import (
+from src import rundir
+from src.cli_util import (
     cli_progress,
     generation_run_config,
     load_eval_runtime,
     resolve_generation_settings,
     select_tasks,
 )
-from ascend_kernel_bench.llm import LLMClient
-from ascend_kernel_bench.log import die, setup_logging
-from ascend_kernel_bench.prompt import SYSTEM_PROMPT, build_prompt
+from src.llm import LLMClient
+from src.log import die, setup_logging
+from src.prompt import SYSTEM_PROMPT, build_prompt
 
 console = Console()
 
@@ -140,9 +140,7 @@ def main() -> None:
                         exc,
                     )
                 progress.advance(bar)
-    logger.info(
-        "done: {}/{} samples saved to {}", total - failures, total, run_dir
-    )
+    logger.info("done: {}/{} samples saved to {}", total - failures, total, run_dir)
     raise SystemExit(1 if failures == total else 0)
 
 

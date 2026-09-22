@@ -96,7 +96,7 @@ class IsolatedJsonWorker:
         return [
             sys.executable,
             "-m",
-            "ascend_kernel_bench.baseline_worker",
+            "src.baseline_worker",
             str(cfg_path),
         ]
 
@@ -138,6 +138,7 @@ class IsolatedJsonWorker:
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True,
+            cwd=str(REPO_ROOT),
             env=env,
         )
         try:

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from . import rundir
 from .config import (
     EvalConfig,
     HardwareProfile,
@@ -17,6 +18,7 @@ from .config import (
     load_hardware_profile,
 )
 from .dataset import Task, discover_tasks, load_task
+from .log import die
 from .report import (
     cli_progress,
     eval_result_lines,
@@ -34,6 +36,7 @@ __all__ = [
     "print_eval_report",
     "read_task_ids",
     "resolve_generation_settings",
+    "resolve_run_dir",
     "sample_status_label",
     "select_tasks",
 ]
@@ -126,6 +129,14 @@ def read_task_ids(path: str | Path) -> list[str]:
         if entry and not entry.startswith("#"):
             ids.append(entry)
     return ids
+
+
+def resolve_run_dir(run: str | Path) -> Path:
+    """Resolve a run name or path, or exit if it is missing."""
+    try:
+        return rundir.resolve_run(run)
+    except FileNotFoundError as exc:
+        die(str(exc))
 
 
 def select_tasks(

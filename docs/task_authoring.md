@@ -77,7 +77,7 @@ Each generated sample contains the two implementation files used by the build/ev
 | `custom_op.asc` | A two-section Ascend C implementation: device kernels above the `ASCEND_HOST_SECTION` marker, the host launch wrapper and a process-local `TORCH_LIBRARY(custom_op, ...)` / `TORCH_LIBRARY_IMPL(custom_op, PrivateUse1, ...)` binding below it. |
 | `model_new.py` | A `ModelNew` class with constructor and forward signatures matching `Model`, calling `torch.ops.custom_op`. |
 
-The `.asc` source must contain `__global__`, `__vector__`, `TORCH_LIBRARY`, and `TORCH_LIBRARY_IMPL`, plus exactly one `// ==================== ASCEND_HOST_SECTION ====================` separator line. The device section includes only `kernel_operator.h`; the host section includes `torch/library.h`, `ATen/ATen.h`, and the `torch_npu` stream header, and launches each kernel through the generated `<kernel>_launch(numBlocks, (void*)stream, args...)` stub. Follow the bundled [elementwise-add example](https://github.com/wuzhenqing/AscendKernelBench/tree/main/src/ascend_kernel_bench/prompts/examples/001_elementwise_add) for the kernel class, current NPU stream, launch, and binding structure. The namespace is fixed to `custom_op`; exported entry point names are free, with `run` used by convention. The build system supplies the CMake project and target architecture and writes `libcustom_op.so` into the sample directory. Do not emit pybind11 code or an OPP / `custom_opp` install project; the evaluator loads that `.so` with `torch.ops.load_library`.
+The `.asc` source must contain `__global__`, `__vector__`, `TORCH_LIBRARY`, and `TORCH_LIBRARY_IMPL`, plus exactly one `// ==================== ASCEND_HOST_SECTION ====================` separator line. The device section includes only `kernel_operator.h`; the host section includes `torch/library.h`, `ATen/ATen.h`, and the `torch_npu` stream header, and launches each kernel through the generated `<kernel>_launch(numBlocks, (void*)stream, args...)` stub. Follow the bundled [elementwise-add example](https://github.com/wuzhenqing/AscendKernelBench/tree/main/src/prompts/examples/001_elementwise_add) for the kernel class, current NPU stream, launch, and binding structure. The namespace is fixed to `custom_op`; exported entry point names are free, with `run` used by convention. The build system supplies the CMake project and target architecture and writes `libcustom_op.so` into the sample directory. Do not emit pybind11 code or an OPP / `custom_opp` install project; the evaluator loads that `.so` with `torch.ops.load_library`.
 
 The wrapper should remain small:
 
@@ -107,7 +107,7 @@ All tensor computation belongs in the Ascend C kernel. The Python wrapper may ha
 
 Candidates must not mutate their inputs, and their output must depend on the current input values. Correctness trials check top-level tensor inputs for candidate mutation after reference execution. Timing uses fresh inputs where practical and follows with an additional output check.
 
-The [checker implementation](https://github.com/wuzhenqing/AscendKernelBench/blob/main/src/ascend_kernel_bench/checker.py) is the exact source of accepted/rejected syntax. Its pattern and AST checks are heuristics and may reject unfamiliar legitimate forms. Passing these checks does not prove that a candidate is safe or honest. Subprocess separation and timeout handling are not a security sandbox.
+The [checker implementation](https://github.com/wuzhenqing/AscendKernelBench/blob/main/src/checker.py) is the exact source of accepted/rejected syntax. Its pattern and AST checks are heuristics and may reject unfamiliar legitimate forms. Passing these checks does not prove that a candidate is safe or honest. Subprocess separation and timeout handling are not a security sandbox.
 
 ## Add and review a task
 
@@ -115,10 +115,10 @@ The [checker implementation](https://github.com/wuzhenqing/AscendKernelBench/blo
 2. Confirm that discovery loads it without executing the model:
 
    ```bash
-   python -c 'from ascend_kernel_bench.dataset import load_task; print(load_task("level1/101_Example").task_id)'
+   python -c 'from src.dataset import load_task; print(load_task("level1/101_Example").task_id)'
    ```
 
-   Replace the example ID with your new task ID. This requires the package to be installed, but it does not require an NPU.
+   Replace the example ID with your new task ID. Run it from the checkout root; it does not require an NPU.
 
 3. Review initialization, input generation, shapes, output structure, and optional comparison overrides.
 4. On a configured Ascend machine, evaluate candidate correctness and timing using the [evaluation workflow](guide/evaluation.md).

@@ -14,18 +14,18 @@ import _bootstrap  # noqa: F401
 from loguru import logger
 from rich.console import Console
 
-from ascend_kernel_bench._paths import BASELINE_DIR
-from ascend_kernel_bench.cli_util import (
+from src._paths import BASELINE_DIR
+from src.cli_util import (
     cli_progress,
     load_eval_runtime,
     select_tasks,
 )
-from ascend_kernel_bench.config import EvalConfig
-from ascend_kernel_bench.dataset import Task
-from ascend_kernel_bench.io_util import write_json_atomic
-from ascend_kernel_bench.log import die, setup_logging
-from ascend_kernel_bench.process import IsolatedJsonWorker
-from ascend_kernel_bench.timing import l2_clear_bytes
+from src.config import EvalConfig
+from src.dataset import Task
+from src.io_util import write_json_atomic
+from src.log import die, setup_logging
+from src.process import IsolatedJsonWorker
+from src.timing import l2_clear_bytes
 
 console = Console()
 
@@ -61,9 +61,7 @@ def measure_baseline(
     if outcome.returncode != 0:
         raise RuntimeError(f"baseline worker failed: {outcome.stderr[-1000:]}")
     if outcome.payload is None:
-        raise RuntimeError(
-            f"invalid baseline worker JSON: {outcome.parse_error}"
-        )
+        raise RuntimeError(f"invalid baseline worker JSON: {outcome.parse_error}")
     stats = outcome.payload
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(out_path, stats)
@@ -109,9 +107,7 @@ def main() -> None:
                     l2_clear_size=flush,
                 )
                 if stats.get("supported_on_npu", True):
-                    progress.console.print(
-                        f"  {task.task_id}: {stats['mean']:.4f} ms"
-                    )
+                    progress.console.print(f"  {task.task_id}: {stats['mean']:.4f} ms")
                 else:
                     progress.console.print(
                         f"  [yellow]{task.task_id}: not supported on NPU"

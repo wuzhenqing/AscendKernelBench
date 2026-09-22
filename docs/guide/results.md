@@ -79,6 +79,16 @@ The following is an illustrative schema example, **not a measured result**:
         "timing_fresh_inputs": true,
         "speedup": 1.5,
         "excessive_speedup": false,
+        "hidden_distributions": ["d1", "d2", "d3", "d4"],
+        "hidden_passed": ["d1", "d2", "d3", "d4"],
+        "hidden_failed": null,
+        "harness": {
+          "model": "example-model",
+          "prompt_mode": "one_shot",
+          "temperature": 0.0,
+          "reasoning_effort": "high",
+          "max_tokens": 131072
+        },
         "bytes_moved": 8388608,
         "sol_bound_ms": 0.00524,
         "sol_bound_kind": "roofline_memory",
@@ -98,7 +108,7 @@ The following is an illustrative schema example, **not a measured result**:
 | --- | --- |
 | `sample_id` | Integer identifying a generated candidate within a task; added during aggregation. |
 | `compiled` | Build-stage status in normal execution. Early failures and worker failures can report `false`; this is not a complete compiler audit trail. |
-| `correctness` | Final correctness decision, including a post-timing fresh-input check. |
+| `correctness` | Final correctness decision. This includes the seeded trials, the four hidden value transforms, and the post-timing fresh-input check. |
 | `runtime` | Candidate mean NPU latency in milliseconds, or `null`. |
 | `runtime_stats` | Candidate timing statistics, or `null`. |
 | `ref_runtime` | Live NPU reference mean latency in milliseconds, or `null`. |
@@ -109,7 +119,7 @@ Common diagnostic metadata includes `static_check_error` (a list), `compilation_
 
 `max_difference` is a limited diagnostic: it is updated for mismatched top-level tensor outputs of equal shape when a numeric difference can be calculated. It is not a complete maximum-error statistic across every output or successful trial. A value of zero does not prove bitwise equality.
 
-`correctness_trials` and `correctness_passed` describe the initial trials. A post-timing failure can leave those counts fully passed while setting final `correctness` to `false`.
+`correctness_trials` and `correctness_passed` describe the initial seeded trials. A hidden-distribution failure or a post-timing failure can leave those counts fully passed while setting final `correctness` to `false`. `hidden_failed` is the first failing transform (`d1` through `d4`), or `null` when the gate passed. `harness` copies the generation settings that define the run (model, prompt mode, temperature, reasoning effort, max tokens), so a copied `eval_results.json` still names the model-harness pair that produced it.
 
 ### Missing timing and partial results
 
@@ -118,7 +128,7 @@ Missing latency is not zero latency. Typical cases include:
 | Result state | Expected interpretation |
 | --- | --- |
 | Static/build failure | Incorrect; no timing. Inspect static violations or compiler logs. |
-| Initial correctness failure | Incorrect; timing is skipped. |
+| Initial correctness failure, including a hidden-distribution mismatch | Incorrect; timing is skipped. |
 | Correct with `reference: "cpu"` | Candidate timing may exist, but no NPU reference timing or speedup. |
 | Timing exception | Correctness may remain true after a successful post-timing check; timing can be absent or partial. |
 | Post-timing failure | Incorrect; already collected timing fields can still be present. |

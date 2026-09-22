@@ -44,7 +44,7 @@ The batch evaluator visits complete sample directories sequentially and re-evalu
 
 For each sample, the host checks that `custom_op.asc` and `model_new.py` exist and applies the [candidate static checks](../task_authoring.md#candidate-rules-and-checks). A static violation produces a failed result without launching the worker.
 
-An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. The host starts `scripts/_eval_worker.py`, which bootstraps the checkout `src/` path and calls `eval_device.eval_sample_on_device`. It builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. Results travel through a temporary JSON file rather than standard output.
+An accepted sample runs in a fresh subprocess using the same Python interpreter as the host. The host starts `scripts/_eval_worker.py`, which adds the checkout root to `sys.path` and calls `eval_device.eval_sample_on_device`. It builds `libcustom_op.so` with the fixed `build_template/CMakeLists.txt`, loads that library with `torch.ops.load_library` **in the worker process** (not via pybind import, `sys.path`, or a global install), then loads the task and `ModelNew`. Results travel through a temporary JSON file rather than standard output.
 
 The host allows `eval_timeout + 2 * build_timeout` seconds for the whole worker: 1,500 seconds with the defaults. There is no separate 300-second timer started after compilation. On an overall timeout, the host attempts to kill the worker's entire process group and records a failure.
 
@@ -71,6 +71,21 @@ It then derives `num_correct_trials` seeds from the base seed. For every trial:
 
 A candidate exception or detected input mutation fails the sample immediately. Output mismatches are recorded while subsequent trials continue. Correctness requires every initial trial to pass.
 
+### Hidden value distributions
+
+Those seeded trials redraw `get_inputs()`. On this corpus that draw is usually uniform on `[0, 1)`, so extra seeds do not change the sign or the magnitude band. KernelBench-Verified showed that frontier models exploit exactly that narrow draw (a ReLU implemented as the identity reported a 374× speedup until inputs were negated).
+
+After the seeded trials pass, the worker draws one more input set from the base seed and checks four value-only transforms of it. Shapes, integer and Boolean tensors, Python scalars, and exact zeros stay as they are. Nonzero floating and complex entries are scaled by:
+
+| Name | Scale | What a failure usually means |
+| --- | --- | --- |
+| `d1` | `1` | The original draw. |
+| `d2` | `3` | Large-magnitude overflow or an unstable reduction. |
+| `d3` | `0.01` | Underflow, or a kernel that only works away from zero. |
+| `d4` | `-1` | A sign shortcut, including an identity posing as ReLU. |
+
+Any mismatch, candidate exception, or input mutation fails the sample. Timing is skipped, `metadata.hidden_failed` names the first failing transform, and `metadata.hidden_passed` lists the ones that matched. The factors are not written into the generation prompt, and there is no flag to skip the gate. Timing and the post-timing re-check still use unscaled `get_inputs()` draws, so speedup stays comparable to the eager reference on the distribution the model was shown.
+
 ### Comparison and tolerances
 
 Default tolerances are:
@@ -95,7 +110,7 @@ A correct CPU-reference sample contributes to correctness metrics. It can have a
 
 ## Timing
 
-Only samples passing the initial correctness trials enter timing. Candidate and NPU reference are measured separately in the same worker; the candidate is measured first. Evaluation always measures the reference live and does not read archived baseline JSON files.
+Only samples that pass the seeded trials and all four hidden transforms enter timing. Candidate and NPU reference are measured separately in the same worker; the candidate is measured first. Evaluation always measures the reference live and does not read archived baseline JSON files.
 
 ### Input refresh
 

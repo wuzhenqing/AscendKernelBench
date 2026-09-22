@@ -13,15 +13,16 @@ import _bootstrap  # noqa: F401
 from loguru import logger
 from rich.console import Console
 
-from ascend_kernel_bench import rundir
-from ascend_kernel_bench.cli_util import (
+from src import rundir
+from src.cli_util import (
     cli_progress,
     eval_result_lines,
     print_eval_report,
+    resolve_run_dir,
     sample_status_label,
 )
-from ascend_kernel_bench.eval import evaluate_run
-from ascend_kernel_bench.log import die, setup_logging
+from src.eval import evaluate_run
+from src.log import die, setup_logging
 
 console = Console()
 
@@ -39,10 +40,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    try:
-        run_dir = rundir.resolve_run(args.run)
-    except FileNotFoundError as exc:
-        die(str(exc))
+    run_dir = resolve_run_dir(args.run)
 
     samples = list(rundir.iter_sample_dirs(run_dir, level=args.level))
     if not samples:
@@ -59,9 +57,7 @@ def main() -> None:
     with cli_progress(console) as progress:
         bar = progress.add_task("evaluating", total=len(samples))
 
-        def on_sample(
-            task_id: str, sample_id: int, result: dict[str, object]
-        ) -> None:
+        def on_sample(task_id: str, sample_id: int, result: dict[str, object]) -> None:
             progress.update(bar, description=f"{task_id} s{sample_id}")
             style, label = sample_status_label(result)
             progress.console.print(

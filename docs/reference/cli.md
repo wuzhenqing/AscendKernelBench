@@ -1,6 +1,6 @@
 # CLI reference
 
-Run these scripts from the checkout root. Each script bootstraps the repository `src/` directory, so an editable `pip install` of this package is not required to import it. Third-party dependencies still need to be installed; see [getting started](../guide/getting-started.md). Each command supports `-h` / `--help`. The scripts are the only command-line interface; installing the package does not add an executable entry point.
+Run these scripts from the checkout root. Each script adds the checkout root to `sys.path` and imports `src.*`. Third-party dependencies still need to be installed; see [getting started](../guide/getting-started.md). Each command supports `-h` / `--help`. The scripts are the only command-line interface.
 
 `scripts/_eval_worker.py` is an internal process entry used by `evaluate_run`. Do not invoke it directly.
 

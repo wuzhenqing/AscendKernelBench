@@ -124,6 +124,10 @@ def print_eval_report(
         "flagged excessive speedup",
         str(summary.get("excessive_speedup", 0)),
     )
+    table.add_row(
+        "hidden-distribution failures",
+        str(summary.get("hidden_failed", 0)),
+    )
     for key, value in summary["fast_p"].items():
         table.add_row(key, f"{value:.3f}")
     table.add_row(

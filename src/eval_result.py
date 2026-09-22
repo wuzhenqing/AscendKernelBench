@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .compare import HIDDEN_DISTRIBUTIONS
+
 __all__ = [
     "compiled_result",
     "eval_protocol_metadata",
@@ -105,4 +107,5 @@ def eval_protocol_metadata(
         "l2_clear_size": int(l2_clear_size),
         "atol": atol,
         "rtol": rtol,
+        "hidden_distributions": [name for name, _scale in HIDDEN_DISTRIBUTIONS],
     }

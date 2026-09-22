@@ -9,10 +9,9 @@ import json
 import _bootstrap  # noqa: F401
 from rich.console import Console
 
-from ascend_kernel_bench import rundir
-from ascend_kernel_bench.cli_util import print_eval_report
-from ascend_kernel_bench.io_util import read_json_object
-from ascend_kernel_bench.log import die, setup_logging
+from src.cli_util import print_eval_report, resolve_run_dir
+from src.io_util import read_json_object
+from src.log import die, setup_logging
 
 console = Console()
 
@@ -24,10 +23,7 @@ def main() -> None:
     parser.add_argument("run", help="run name under runs/, or an existing path")
     args = parser.parse_args()
 
-    try:
-        run_dir = rundir.resolve_run(args.run)
-    except FileNotFoundError as exc:
-        die(str(exc))
+    run_dir = resolve_run_dir(args.run)
 
     results_path = run_dir / "eval_results.json"
     if not results_path.is_file():

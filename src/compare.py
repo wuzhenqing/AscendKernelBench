@@ -135,6 +135,44 @@ def max_abs_diff(ref: Any, new: Any) -> float:
     return value
 
 
+################################ HIDDEN INPUTS ################################
+# Value-only transforms from KernelBench-Verified. Shapes stay fixed so
+# shape specialization remains a legal optimization.
+HIDDEN_DISTRIBUTIONS: tuple[tuple[str, float], ...] = (
+    ("d1", 1.0),
+    ("d2", 3.0),
+    ("d3", 0.01),
+    ("d4", -1.0),
+)
+################################ HIDDEN INPUTS ################################
+
+
+def perturb_floating_inputs(inputs: Sequence[Any], scale: float) -> list[Any]:
+    """Clone inputs and scale nonzero floating values by scale.
+
+    Integer, Boolean, and exact-zero entries are left unchanged, as are
+    shapes. scale 1 is a clone of the original draw.
+    """
+    return [_perturb_floating(item, scale) for item in inputs]
+
+
+def _perturb_floating(value: Any, scale: float) -> Any:
+    """Return a scaled clone of one input node."""
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        out = value.detach().clone()
+        if scale != 1.0 and (torch.is_floating_point(out) or torch.is_complex(out)):
+            nonzero = out != 0
+            out = torch.where(nonzero, out * scale, out)
+        return out
+    if isinstance(value, list):
+        return [_perturb_floating(item, scale) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_perturb_floating(item, scale) for item in value)
+    return value
+
+
 def snapshot_inputs(inputs: Sequence[Any]) -> list[Any]:
     """Clone top-level tensors so later mutations can be detected."""
     import torch

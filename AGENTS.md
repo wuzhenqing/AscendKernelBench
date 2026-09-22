@@ -27,7 +27,8 @@ KernelBench task + hardware profile
   -> isolated worker (scripts/_eval_worker.py)
   -> build.py + build_template/ -> libcustom_op.so -> torch.ops.load_library
        (marked sources: split kernel/launcher/host units + shared host PCH)
-  -> eval_device.py: seeded correctness -> NPU-event timing -> fresh-input re-check
+  -> eval_device.py: seeded correctness -> hidden value gate
+       (d1..d4) -> NPU-event timing -> fresh-input re-check
   -> per-sample eval_result.json
   -> eval_results.json + pass_at_k_results.json -> score.py / scripts/analyze.py
 ```
@@ -97,9 +98,9 @@ CLI facts worth remembering:
 | Path | What lives there |
 | --- | --- |
 | `KernelBench/level{1..4}/` | Vendored corpus: 270 tasks (100/100/50/20). Read-only in spirit. |
-| `src/ascend_kernel_bench/` | Engine: dataset, prompt, LLM, checks, eval, build, timing, scoring, reporting. |
-| `src/ascend_kernel_bench/checks/` | Static anti-cheat: `rules.py` (regex catalogs), `python_ast.py` (wrapper AST), `ascend_c.py` (Ascend C), `python_source.py`/`text.py` (entry points and masking). |
-| `src/ascend_kernel_bench/prompts/examples/` | Few-shot example pairs shipped as package data. |
+| `src/` | Engine: dataset, prompt, LLM, checks, eval, build, timing, scoring, reporting. |
+| `src/checks/` | Static anti-cheat: `rules.py` (regex catalogs), `python_ast.py` (wrapper AST), `ascend_c.py` (Ascend C), `python_source.py`/`text.py` (entry points and masking). |
+| `src/prompts/examples/` | Few-shot example pairs used by prompt.py. |
 | `scripts/` | The four user CLIs plus `_bootstrap.py` / `_eval_worker.py`. |
 | `configs/eval_default.yaml` | Default protocol: 5 correctness trials, 10 warmup + 100 perf trials, tolerances, timeouts, generation defaults. |
 | `configs/hardware/*.yaml` | Hardware profiles validated by `config.HardwareProfile`. Default `ascend910b2`; `ascend950pr` is reserved and unvalidated. |
@@ -113,8 +114,8 @@ CLI facts worth remembering:
 Module boundaries are strict; `docs/reference/architecture.md` has the full
 API-layer table. In short: host code goes through `eval.evaluate_run`;
 `eval_device` and `worker_main` are worker-side only; `score.py` never loads
-kernels or tasks; `_paths.py` anchors all data directories to the repo root
-(override with `ASCEND_KERNEL_BENCH_REPO_ROOT` for an installed package).
+kernels or tasks; `_paths.py` anchors all data directories to the checkout
+root (`src/` sits directly under that root).
 
 ## Invariants — do not break these
 
@@ -131,8 +132,10 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
    `torch.ops.custom_op` (plus integer shape arithmetic); `nn` modules may be
    parameter containers but must never be called.
 4. **Static checks are advisory; the runtime protocol is the backstop.** The
-   fresh-input re-check and `excessive_speedup` flag exist because regex/AST
-   checks cannot stop determined obfuscation. Do not weaken either layer alone.
+   fresh-input re-check, the four hidden value transforms (d1..d4), and the
+   `excessive_speedup` flag exist because regex/AST checks cannot stop
+   determined obfuscation. Do not weaken any of those layers alone. The
+   transform factors stay out of the generation prompt.
 5. **Scoring semantics are KernelBench-compatible.** `fast_0` is the
    correctness rate over *collected* sample results. Generation failures that
    never wrote a sample are absent from the denominator, not failures.
@@ -162,8 +165,8 @@ kernels or tasks; `_paths.py` anchors all data directories to the repo root
   KernelBench-compatible and carry the protocol snapshot.
 * Logging is loguru (`logger`); Rich is for CLIs and `report.py` only. Fatal CLI
   errors go through `log.die()`.
-* Public API is re-exported from `__init__.py` and `__all__`; keep that list
-  accurate when adding a public function.
+* Scripts import checkout modules as `src.*`. Engine modules use relative
+  imports. `__init__.py` is not a public library surface.
 * No GitHub Actions workflow ships with this tree. Kernel build and timing
   stay host-side validation on an Ascend machine.
 

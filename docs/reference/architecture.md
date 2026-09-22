@@ -52,18 +52,17 @@ KernelBench task + hardware profile
 | `io_util.py` | Atomic JSON/YAML writes, JSON-object reads, and worker cfg loading. |
 | `baseline_worker.py` | Isolated eager-reference timing used by `scripts/baseline.py`. |
 | `score.py` | Sample speedups, `fast_p`, geometric mean speedup, pass@k, and mean SOL. |
-| `scripts/_eval_worker.py` | Internal worker process entry. Bootstraps `src/` and calls `worker_main`. |
+| `scripts/_eval_worker.py` | Internal worker process entry. Bootstraps the checkout root and calls `worker_main`. |
 
-The Python modules are in [`src/ascend_kernel_bench/`](https://github.com/wuzhenqing/AscendKernelBench/tree/main/src/ascend_kernel_bench). The scripts under [`scripts/`](https://github.com/wuzhenqing/AscendKernelBench/tree/main/scripts) expose the workflows without a separate installed command-line executable.
+The Python modules are in [`src/`](https://github.com/wuzhenqing/AscendKernelBench/tree/main/src). The scripts under [`scripts/`](https://github.com/wuzhenqing/AscendKernelBench/tree/main/scripts) are the user entry points.
 
 ## Evaluation API layers
 
 | Layer | What to call | What not to call |
 | --- | --- | --- |
 | CLI | `scripts/evaluate.py`, `scripts/analyze.py` | `scripts/_eval_worker.py` |
-| Public library | `evaluate_run`, plus rundir helpers and `summarize_eval_results` / `compute_pass_at_k` | `eval_sample`, `eval_sample_on_device`, `worker_main` |
-| Internal host | `eval_sample`, `_run_eval_worker`, `_worker_argv` | Device-side build and timing |
-| Internal worker | `worker_main` → `eval_sample_on_device` → `build_custom_op` / `load_custom_op` | Anything from the host process |
+| Engine host | `evaluate_run`, `eval_sample`, rundir helpers, `score.py` | `eval_sample_on_device`, `worker_main` |
+| Isolated worker | `worker_main` → `eval_sample_on_device` → `build_custom_op` / `load_custom_op` | Anything from the host process |
 
 `evaluate.py` is a thin argparse wrapper around `evaluate_run`. The CLI accepts a run name and an optional level.
 
@@ -76,17 +75,11 @@ The Python modules are in [`src/ascend_kernel_bench/`](https://github.com/wuzhen
 | `baseline.py` | Reference tasks, evaluation settings, device | Archived NPU reference latency | Yes |
 | `analyze.py` | Existing aggregate evaluation JSON | Terminal score tables | No |
 
-Evaluation is sequential at the batch-script level, with a new worker for each sample. The package does not provide a scheduler, multi-device dispatcher, or resumable evaluation queue.
+Evaluation is sequential at the batch-script level, with a new worker for each sample. There is no scheduler, multi-device dispatcher, or resumable evaluation queue.
 
-## Repository data and installed package
+## Repository data
 
-`_paths.py` anchors configurations, tasks, build templates, runs, and baseline results to a repository root. By default, the root is inferred from the source package layout. Set `ASCEND_KERNEL_BENCH_REPO_ROOT` to a checkout path when using an installed package whose location is separate from those data directories.
-
-```bash
-export ASCEND_KERNEL_BENCH_REPO_ROOT=/path/to/AscendKernelBench
-```
-
-Prompt examples live inside the package and are included as package data. The vendored corpus and top-level configuration/build directories remain repository assets. A wheel installation alone is therefore not a replacement for the checkout.
+`_paths.py` anchors configurations, tasks, build templates, runs, and baseline results to the checkout root, inferred as the parent of `src/`. Prompt examples live under `src/prompts/examples/`. The vendored corpus and top-level configuration/build directories remain checkout assets.
 
 ## Generation boundary
 
@@ -98,7 +91,7 @@ These checks establish that response fields resemble the expected files; they do
 
 ## Evaluation boundary
 
-The host (`evaluate_run` → `eval_sample`) reads sample source and runs static checks before launching `scripts/_eval_worker.py` with the same Python interpreter. That script adds the checkout `src/` directory to `sys.path`, so the worker does not require a pip-installed package. A temporary config JSON carries the task source, sample path, profile architecture, and resolved evaluation settings into the worker. The worker calls `eval_device.eval_sample_on_device` and writes a JSON result file back. `python -m ascend_kernel_bench.eval` remains as an internal fallback and is not a user entry point.
+The host (`evaluate_run` → `eval_sample`) reads sample source and runs static checks before launching `scripts/_eval_worker.py` with the same Python interpreter. That script adds the checkout root to `sys.path` and imports `src.eval`. A temporary config JSON carries the task source, sample path, profile architecture, and resolved evaluation settings into the worker. The worker calls `eval_device.eval_sample_on_device` and writes a JSON result file back. Correctness is the seeded trials plus a four-distribution value gate (original, ×3, ×0.01, ×−1) adapted from KernelBench-Verified; timing still uses the original input draw. The host then stamps `metadata.harness` from `generation_config.yaml`, so a result names the model-harness pair and not only the model.
 
 NPU imports live inside worker/timing functions so source inspection and host-side utilities do not initialize an NPU runtime. The worker loads generated code, compiles native code, and uses the selected NPU. Its process is separate but has the invoking user's privileges; this is not a security sandbox.
 

@@ -21,10 +21,12 @@ from .build import (
     split_asc_source,
 )
 from .compare import (
+    HIDDEN_DISTRIBUTIONS,
     compare_candidate_outputs,
     inputs_were_mutated,
     max_abs_diff,
     move_value_to_device,
+    perturb_floating_inputs,
     resolve_tolerances,
     snapshot_inputs,
     tensor_nbytes,
@@ -155,6 +157,9 @@ class SampleEvaluator:
         if self.pass_count != self.req.num_correct_trials:
             self.metadata["correctness_error"] = self.correctness_error
             return compiled_result(correctness=False, metadata=self.metadata)
+        hidden_failure = self._run_hidden_distributions()
+        if hidden_failure is not None:
+            return hidden_failure
         if self.req.measure_performance:
             self._time_both_models()
             if self._post_timing_recheck() is not None:
@@ -290,7 +295,12 @@ class SampleEvaluator:
         return self.ref_model_cpu(*cpu_reference_inputs(raw_inputs, self.torch))
 
     def _run_reference(
-        self, inputs: Sequence[Any], raw_inputs: Sequence[Any], trial: int
+        self,
+        inputs: Sequence[Any],
+        raw_inputs: Sequence[Any],
+        trial: int,
+        *,
+        stage: str | None = None,
     ) -> Any:
         """Run the NPU reference, falling back to CPU after a device error."""
         if self.ref_mode != "npu":
@@ -301,7 +311,8 @@ class SampleEvaluator:
             return ref_out
         except Exception as exc:
             self.ref_mode = "cpu"
-            self.ref_npu_error = f"trial {trial}: {exc!r}"
+            label = stage or f"trial {trial}"
+            self.ref_npu_error = f"{label}: {exc!r}"
             return self._run_ref_cpu(raw_inputs)
 
     ################################# TRIALS #################################
@@ -319,7 +330,59 @@ class SampleEvaluator:
                     return failed
         return None
 
-    ################################# TRIALS #################################
+    def _run_hidden_distributions(self) -> dict[str, Any] | None:
+        """Gate on four value transforms; timing keeps the original draw."""
+        seed_torch(self.req.seed)
+        raw_inputs = self.get_inputs()
+        passed: list[str] = []
+        with self.torch.no_grad():
+            for name, scale in HIDDEN_DISTRIBUTIONS:
+                failed = self._one_hidden_distribution(name, scale, raw_inputs)
+                if failed is not None:
+                    self.metadata["hidden_passed"] = passed
+                    self.metadata["hidden_failed"] = name
+                    self.metadata.update(failed)
+                    return self._compiled(correctness=False)
+                passed.append(name)
+        self.metadata["hidden_passed"] = passed
+        self.metadata["hidden_failed"] = None
+        return None
+
+    def _one_hidden_distribution(
+        self,
+        name: str,
+        scale: float,
+        raw_inputs: Sequence[Any],
+    ) -> dict[str, Any] | None:
+        """Return an error mapping when one hidden transform fails."""
+        raw = perturb_floating_inputs(raw_inputs, scale)
+        inputs = [self._process_input(item) for item in raw]
+        self.torch.npu.synchronize(device=self.req.device)
+        try:
+            ref_out = self._run_reference(inputs, raw, 0, stage=f"hidden {name}")
+        except Exception as exc:
+            return {
+                "runtime_error": (f"hidden {name}: reference runtime error: {exc!r}")
+            }
+        ref_snapshot = snapshot_inputs(inputs)
+        try:
+            new_out = self.new_model(*inputs)
+            self.torch.npu.synchronize(device=self.req.device)
+        except Exception as exc:
+            return {
+                "runtime_error": (f"hidden {name}: candidate runtime error: {exc!r}")
+            }
+        if inputs_were_mutated(inputs, ref_snapshot):
+            return {"runtime_error": f"hidden {name}: candidate mutated its inputs"}
+        if self._outputs_ok(ref_out, new_out):
+            return None
+        self.max_diff = max(self.max_diff, max_abs_diff(ref_out, new_out))
+        self.metadata["max_difference"] = self.max_diff
+        return {
+            "correctness_error": (
+                f"hidden {name}: output mismatch on value-transformed inputs"
+            )
+        }
 
     def _one_correctness_trial(
         self, trial: int, trial_seed: int
@@ -356,6 +419,8 @@ class SampleEvaluator:
             )
         self.last_new_out = new_out
         return None
+
+    ################################# TRIALS #################################
 
     def _fill_metadata(self) -> None:
         """Record protocol, reference mode, and runtime-stack facts."""

@@ -1,6 +1,6 @@
 # Configuration
 
-Evaluation settings live in `configs/eval_default.yaml`. Hardware descriptions live in `configs/hardware/`, and fixed task subsets in `configs/subsets/`. CLI scripts load these files using `src/ascend_kernel_bench/config.py`.
+Evaluation settings live in `configs/eval_default.yaml`. Hardware descriptions live in `configs/hardware/`, and fixed task subsets in `configs/subsets/`. CLI scripts load these files using `src/config.py`.
 
 ## Precedence and loading
 
@@ -133,7 +133,6 @@ Pass a custom profile with `--hardware configs/hardware/my-device.yaml`, or save
 | `OPENAI_BASE_URL` | Endpoint URL used by `LLMClient`. The CLI has no endpoint URL flag. |
 | `OPENAI_API_KEY` | Credential passed to the endpoint client. The CLI has no API key flag. |
 | `CANN_SET_ENV` | Path to the environment script used by the build helper. Defaults to `/usr/local/Ascend/cann-9.1.0/set_env.sh`. |
-| `ASCEND_KERNEL_BENCH_REPO_ROOT` | Override the root used for configs, tasks, build templates, results, and runs. Set it before starting Python. |
 | `ASCEND_KERNEL_BENCH_ENABLE_CCACHE` | When set to `1` / `true` / `yes` / `on`, the ACLNN CMake configure step receives `-DENABLE_CCACHE=ON`. |
 | `ASCEND_KERNEL_BENCH_CACHE_DIR` | Override the cache root holding the shared host-TU precompiled header. Defaults to `$XDG_CACHE_HOME/ascend-kernel-bench` or `~/.cache/ascend-kernel-bench`. |
 | `ASCEND_KERNEL_BENCH_DISABLE_PCH` | When set to `1` / `true` / `yes` / `on`, the split build compiles the host glue without the precompiled header. |
@@ -142,10 +141,4 @@ Pass a custom profile with `--hardware configs/hardware/my-device.yaml`, or save
 
 If the selected CANN environment script exists, the build helper sources it through Bash and caches the resulting environment for that process. If it does not exist, the helper uses the current environment. Source the appropriate CANN script in your shell before running the evaluator so Python imports and worker startup can also use it.
 
-The default repository root is derived from the source package location. A checkout installation is the supported workflow documented here. If you install the Python package elsewhere, keep a checkout containing the external data directories and set:
-
-```bash
-export ASCEND_KERNEL_BENCH_REPO_ROOT=/absolute/path/to/AscendKernelBench
-```
-
-This redirects data paths; it does not install the scripts, change the working directory, or select a Python environment. The `scripts/*.py` launchers still load source from their own checkout. See [architecture](architecture.md) for the repository layout.
+The repository root is the parent of `src/`. Configs, tasks, the build template, runs, and results all live under that checkout. See [architecture](architecture.md) for the layout.

@@ -7,7 +7,7 @@ import sys
 
 import _bootstrap  # noqa: F401
 
-from ascend_kernel_bench.eval import worker_main
+from src.eval import worker_main
 
 if __name__ == "__main__":
     worker_main(sys.argv)

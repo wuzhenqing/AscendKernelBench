@@ -49,21 +49,45 @@ def resolve_run(run: str | Path) -> Path:
     raise FileNotFoundError(f"run dir not found: {named}")
 
 
-def generation_hardware_name(run_dir: Path) -> str | None:
-    """Return the hardware profile name recorded at generation time."""
+def _read_generation_config(run_dir: Path) -> dict[str, Any]:
+    """Return generation_config.yaml, or an empty mapping when unusable."""
     path = Path(run_dir) / "generation_config.yaml"
     if not path.is_file():
-        return None
+        return {}
     try:
         loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
-        return None
+        return {}
     if not isinstance(loaded, dict):
-        return None
-    name = loaded.get("hardware")
+        return {}
+    return loaded
+
+
+def generation_hardware_name(run_dir: Path) -> str | None:
+    """Return the hardware profile name recorded at generation time."""
+    name = _read_generation_config(run_dir).get("hardware")
     if isinstance(name, str) and name.strip():
         return name.strip()
     return None
+
+
+_HARNESS_KEYS = (
+    "model",
+    "prompt_mode",
+    "temperature",
+    "reasoning_effort",
+    "max_tokens",
+)
+
+
+def generation_harness(run_dir: Path) -> dict[str, Any]:
+    """Return the generation settings that define this run's harness."""
+    loaded = _read_generation_config(run_dir)
+    return {
+        key: loaded[key]
+        for key in _HARNESS_KEYS
+        if key in loaded and loaded[key] is not None
+    }
 
 
 def sample_dir(run_dir: Path, task_id: str, sample_id: int) -> Path:
